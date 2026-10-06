@@ -65,7 +65,7 @@ func Spheres(cfg *config.Config, list string) ([]string, error) {
 func ToolName(a *spec.Action) string { return a.Category + "_" + a.Name }
 
 func served(a *spec.Action) bool {
-	return a.Run != nil && a.Category != "setup" && a.Category != "meta" && a.Category != "launcher"
+	return a.Run != nil && a.Category != "setup" && a.Category != "meta" && a.Category != "launcher" && a.Category != "judge"
 }
 
 type warned struct {

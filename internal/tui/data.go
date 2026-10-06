@@ -14,6 +14,7 @@ import (
 	"github.com/aclemen1/due-cli/internal/actions"
 	"github.com/aclemen1/due-cli/internal/config"
 	"github.com/aclemen1/due-cli/internal/connect"
+	"github.com/aclemen1/due-cli/internal/judge"
 	"github.com/aclemen1/due-cli/internal/ledger"
 	"github.com/aclemen1/due-cli/internal/spec"
 	"github.com/aclemen1/due-cli/internal/trigger"
@@ -73,6 +74,7 @@ func (m *model) loadLedger() tea.Cmd {
 				out.items = append(out.items, actions.ItemOf(l, e))
 			}
 		}
+		judge.Annotate(out.items)
 		return out
 	}
 }
@@ -98,6 +100,7 @@ func (m *model) loadConn(key string) tea.Cmd {
 		for i := range items {
 			items[i].Sphere = c.sphere
 		}
+		judge.Annotate(items)
 		return connMsg{name: key, items: items, err: err}
 	}
 }
@@ -168,6 +171,15 @@ func (m *model) apply() {
 		for _, k := range m.keysOf(m.sourceName()) {
 			out = append(out, m.conn[k]...)
 		}
+	}
+	if m.critOnly {
+		var kept []connect.Item
+		for _, it := range out {
+			if judge.IsCritical(it, m.cfg.Judge.Threshold) {
+				kept = append(kept, it)
+			}
+		}
+		out = kept
 	}
 	if m.filter != "" {
 		needle := strings.ToLower(m.filter)

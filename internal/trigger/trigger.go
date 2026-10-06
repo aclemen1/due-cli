@@ -254,3 +254,26 @@ func settle(l *ledger.Ledger, j job, now time.Time) Fired {
 
 // StopFile, when present, keeps every tick from firing.
 func StopFile() string { return filepath.Join(config.StateDir(), "stopped") }
+
+// Tell sends a message to the owner through the sphere's tell command.
+func Tell(l *ledger.Ledger, message string) error {
+	if len(l.Actions.Tell) == 0 {
+		return spec.UserError("no tell command for sphere %s: set spheres.%s.actions.tell in %s", l.Sphere, l.Sphere, config.Path(""))
+	}
+	vars := map[string]string{"{message}": message, "{dossier}": "desk", "{sphere}": l.Sphere, "{title}": "", "{id}": "", "{ref}": "",
+		"{prompt}": message, "{at}": "", "{when}": "", "{kind}": "alert", "{cwd}": ""}
+	argv := make([]string, len(l.Actions.Tell))
+	for k, a := range l.Actions.Tell {
+		for v, x := range vars {
+			a = strings.ReplaceAll(a, v, x)
+		}
+		argv[k] = config.Expand(a)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, argv[0], argv[1:]...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %v: %s", argv[0], err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}

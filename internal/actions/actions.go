@@ -127,6 +127,7 @@ func init() {
 	registerList()
 	registerFire()
 	registerSources()
+	registerJudge()
 	registerMeta()
 }
 

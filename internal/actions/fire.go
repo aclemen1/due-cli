@@ -56,6 +56,9 @@ func registerFire() {
 			for _, w := range warnings {
 				ctx.Warn(w)
 			}
+			for _, job := range SpawnDaily(cfg, ctx.Config, Now()) {
+				ctx.Warn("started " + job)
+			}
 			if fired == nil {
 				fired = []trigger.Fired{}
 			}

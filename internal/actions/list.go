@@ -9,6 +9,7 @@ import (
 
 	"github.com/aclemen1/due-cli/internal/config"
 	"github.com/aclemen1/due-cli/internal/connect"
+	"github.com/aclemen1/due-cli/internal/judge"
 	"github.com/aclemen1/due-cli/internal/ledger"
 	"github.com/aclemen1/due-cli/internal/spec"
 	"github.com/aclemen1/due-cli/internal/when"
@@ -30,11 +31,12 @@ type SourceError struct {
 
 // Query selects what List gathers.
 type Query struct {
-	Until   string   // horizon: 30d or a date; empty: the sphere's
-	From    string   // start; empty keeps what is late
-	Sources []string // connector names, due for the ledger; empty: all
-	All     bool     // done and dropped entries of the ledger too
-	Search  string
+	Until    string   // horizon: 30d or a date; empty: the sphere's
+	From     string   // start; empty keeps what is late
+	Sources  []string // connector names, due for the ledger; empty: all
+	All      bool     // done and dropped entries of the ledger too
+	Critical bool     // only the lines the judge finds critical
+	Search   string
 }
 
 // List gathers the ledger and the connectors of a sphere.
@@ -159,6 +161,7 @@ func registerList() {
 			{Name: "from", Kind: spec.String, Help: "Start of the window; by default late lines are kept."},
 			{Name: "source", Kind: spec.StringList, Help: "Keep these sources: due (the ledger) or a connector's name. Repeatable."},
 			{Name: "all", Kind: spec.Bool, Help: "Keep done and dropped entries of the ledger."},
+			{Name: "critical", Kind: spec.Bool, Help: "Keep the lines the judge finds critical if forgotten (due assess)."},
 			{Name: "search", Kind: spec.String, Help: "Keep lines whose title or detail contain this text."},
 			readSphereParam(),
 		},
@@ -180,7 +183,7 @@ func registerList() {
 					}
 				}
 			}
-			res, err := ListAll(ctx, cfg, spheres, Query{Until: ctx.Str("until"), From: ctx.Str("from"), Sources: sources, All: ctx.Bool("all"), Search: ctx.Str("search")})
+			res, err := ListAll(ctx, cfg, spheres, Query{Until: ctx.Str("until"), From: ctx.Str("from"), Sources: sources, All: ctx.Bool("all"), Critical: ctx.Bool("critical"), Search: ctx.Str("search")})
 			if err != nil {
 				return nil, err
 			}
@@ -221,6 +224,9 @@ func textListing(w io.Writer, v any) {
 		mark := " "
 		if it.Late {
 			mark = "!"
+		}
+		if it.Critical != nil && *it.Critical >= 0.5 {
+			mark = "⚠"
 		}
 		src := it.Source
 		if len(res.Spheres) > 1 {
@@ -281,6 +287,16 @@ func ListAll(ctx *spec.Context, cfg *config.Config, spheres []string, q Query) (
 		if r.Until.After(out.Until) {
 			out.Until = r.Until
 		}
+	}
+	judge.Annotate(out.Items)
+	if q.Critical {
+		kept := []connect.Item{}
+		for _, it := range out.Items {
+			if judge.IsCritical(it, cfg.Judge.Threshold) {
+				kept = append(kept, it)
+			}
+		}
+		out.Items = kept
 	}
 	connect.Sort(out.Items)
 	return out, nil

@@ -43,6 +43,12 @@ due done 7 --note "<résultat>" --sphere perso
 | `--do` | `tell` (message to the user), `agent` (body = prompt), `command` (`--run`) |
 | `--ref` | what the entry belongs to, e.g. `office:P-0040` |
 
+## Critical lines
+
+`due assess` asks the judge (jev, else OpenJev) whether forgetting a line would have legal, financial or irreversible consequences.
+`due ls --critical` keeps those lines. `due alert` sends their notices (judge.notice) and, on judge.digest's weekday, a digest.
+The launcher runs `assess` at judge.nightly and `alert` at judge.morning. The judge sees title, date, source, detail and sphere; never a body.
+
 - An entry with `--do agent` or `--do command` runs without review at its date: create one only after the user's agreement.
 - Reads cover every sphere unless `--sphere` narrows them; each line names its sphere.
 - Writes need `--sphere`, chosen by what the entry is about (pro for work, perso otherwise); never a default, not even `$DUE_SPHERE`.

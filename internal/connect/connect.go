@@ -32,6 +32,9 @@ type Item struct {
 	State  string    `json:"state,omitempty"`
 	Do     string    `json:"do,omitempty"`
 	Late   bool      `json:"late,omitempty"`
+	// Critical is the judge's probability that forgetting the line costs dearly; nil until judged.
+	Critical *float64 `json:"critical,omitempty"`
+	Nature   string   `json:"nature,omitempty"` // legal, financial, irreversible, none
 }
 
 // Window is the span asked for. From is zero to keep what is late.

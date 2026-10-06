@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/aclemen1/due-cli/internal/connect"
+	"github.com/aclemen1/due-cli/internal/judge"
 	"github.com/aclemen1/due-cli/internal/ledger"
 	"github.com/aclemen1/due-cli/internal/when"
 )
@@ -103,6 +104,9 @@ func (m *model) header(w int) []string {
 	if late > 0 {
 		facts = append(facts, sErr.Render(fmt.Sprintf("%d en retard", late)))
 	}
+	if n := m.criticalCount(); n > 0 {
+		facts = append(facts, sErr.Render(fmt.Sprintf("⚠ %d critique", n))+sErr.Render(map[bool]string{true: "s", false: ""}[n > 1]))
+	}
 	if next != nil {
 		facts = append(facts, sMuted.Render("prochaine : ")+sText.Render(trunc(next.Title, 28))+" "+urgency(next.At, m.now(), false).Render(relShort(next.At, m.now())))
 	}
@@ -146,6 +150,8 @@ func (m *model) header(w int) []string {
 	line2 := strings.Join(tabs, " ")
 	scope := ""
 	switch {
+	case m.critOnly:
+		scope = "critiques seulement"
 	case m.ledgerOnly() && m.showDone:
 		scope = "toutes les dates · faites comprises"
 	case m.ledgerOnly():
@@ -207,7 +213,7 @@ func (m *model) footer(w int) string {
 	case ok && it.Type == "office":
 		return helpLine("a", "ajouter", "o", "ouvrir le dossier", "s", "vue suivante", "esc", "registre", "/", "chercher", "?", "aide", "q", "quitter")
 	default:
-		return helpLine("a", "ajouter", "s", "vue suivante", "H", "horizon", "esc", "registre", "/", "chercher", "?", "aide", "q", "quitter")
+		return helpLine("a", "ajouter", "s", "vue suivante", "c", "critiques", "H", "horizon", "esc", "registre", "/", "chercher", "?", "aide", "q", "quitter")
 	}
 }
 
@@ -226,6 +232,7 @@ func (m *model) help(w int) []string {
 		col("1 … 9", "aller à une vue"),
 		col("esc", "efface le filtre, puis revient au registre"),
 		col("H", "horizon des vues toutes et sources : 7, 30, 90, 365 jours"),
+		col("c", "lignes critiques seulement : conséquences juridiques, financières ou irréversibles si oubliées"),
 		col("f", "montrer aussi les échéances faites et abandonnées"),
 		col("tab", "montrer ou masquer le détail"),
 		col("/", "chercher dans les titres et détails"),
@@ -400,6 +407,9 @@ func (m *model) row(it connect.Item, w int) string {
 	if it.Late && !done {
 		dot = sErr.Render("!")
 	}
+	if !done && judge.IsCritical(it, m.cfg.Judge.Threshold) {
+		dot = sErr.Render("⚠")
+	}
 	var date string
 	if m.ledgerOnly() {
 		date = shortDay(it.At, now)
@@ -505,6 +515,7 @@ func (m *model) lineDetail(it connect.Item, w int) []string {
 		field("sphère", sphereTag(it.Sphere)),
 		field("id", sText.Render(it.ID)),
 	}
+	out = append(out, m.verdict(it)...)
 	if it.Detail != "" {
 		for i, l := range wrap(it.Detail, w-11) {
 			name := ""
@@ -544,6 +555,7 @@ func (m *model) entryDetail(it connect.Item, w int) []string {
 	if e.Ref != "" {
 		out = append(out, " "+sMuted.Render("réf. ")+sText.Render(e.Ref))
 	}
+	out = append(out, m.verdict(it)...)
 	out = append(out, "", " "+sSection.Render("Calendrier"))
 	created, _ := time.Parse(time.RFC3339, e.Created)
 	for _, in := range e.Instants(now.Location(), m.cfg.DefaultTime) {
@@ -813,4 +825,44 @@ func (m *model) nowRule(w int) string {
 	right := max(0, w-left-ansi.StringWidth(label)-1)
 	st := lipgloss.NewStyle().Foreground(cStopped)
 	return " " + st.Render(strings.Repeat("─", left)) + lipgloss.NewStyle().Foreground(cStopped).Bold(true).Render(label) + st.Render(strings.Repeat("─", right))
+}
+
+func (m *model) criticalCount() int {
+	n := 0
+	seen := map[string]bool{}
+	count := func(it connect.Item) {
+		if it.Type == "due" && it.State != ledger.Open {
+			return
+		}
+		if judge.IsCritical(it, m.cfg.Judge.Threshold) && !seen[key(it)] {
+			seen[key(it)] = true
+			n++
+		}
+	}
+	for _, it := range m.ledger {
+		count(it)
+	}
+	for _, items := range m.conn {
+		for _, it := range items {
+			count(it)
+		}
+	}
+	return n
+}
+
+// verdict shows what the judge said about a line.
+func (m *model) verdict(it connect.Item) []string {
+	if it.Critical == nil {
+		return []string{" " + sMuted.Render("pas encore jugée (due assess)")}
+	}
+	p := int(*it.Critical*100 + 0.5)
+	nature := judge.NatureLabels[it.Nature]
+	if judge.IsCritical(it, m.cfg.Judge.Threshold) {
+		s := fmt.Sprintf("⚠ critique si oubliée (%d %%)", p)
+		if it.Nature != "" && it.Nature != "none" {
+			s += " · " + nature
+		}
+		return []string{" " + sErr.Render(s)}
+	}
+	return []string{" " + sMuted.Render(fmt.Sprintf("sans conséquence grave si oubliée (%d %%)", p))}
 }

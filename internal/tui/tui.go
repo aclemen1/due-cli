@@ -85,6 +85,7 @@ type model struct {
 	horizon  int
 	filter   string
 	showDone bool
+	critOnly bool
 	detailOn bool
 	helpOn   bool
 
@@ -355,6 +356,9 @@ func (m *model) keyList(k tea.KeyPressMsg) tea.Cmd {
 		case m.filter != "":
 			m.filter = ""
 			m.apply()
+		case m.critOnly:
+			m.critOnly = false
+			m.apply()
 		case !m.ledgerOnly():
 			return m.setView(0)
 		}
@@ -376,6 +380,12 @@ func (m *model) keyList(k tea.KeyPressMsg) tea.Cmd {
 			m.setStatus("horizon "+horizons[m.horizon]+" (vue toutes et connecteurs)", false)
 		}
 		return m.loadAll()
+	case "c":
+		m.critOnly = !m.critOnly
+		m.apply()
+		if m.critOnly {
+			m.setStatus("lignes critiques seulement (c pour tout revoir)", false)
+		}
 	case "f":
 		m.showDone = !m.showDone
 		m.persist()
