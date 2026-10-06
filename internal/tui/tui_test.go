@@ -262,3 +262,14 @@ func TestTwoSpheresAndTheFormAsksWhich(t *testing.T) {
 		t.Fatalf("the entry goes to pro and shows its sphere:\n%s", s)
 	}
 }
+
+func TestNowRuleBetweenPastAndFuture(t *testing.T) {
+	m := setup(t)
+	add(t, m, "Payer la facture", "01.10.2026", "")
+	add(t, m, "Résilier l'abonnement", "20.10.2026", "")
+	s := screen(m)
+	late, rule, next := strings.Index(s, "il y a 6 j"), strings.Index(s, "maintenant · mer. 07.10 10:00"), strings.Index(s, "dans 13 j   Résilier")
+	if late < 0 || rule < 0 || next < 0 || !(late < rule && rule < next) {
+		t.Fatalf("the now rule sits between past and future:\n%s", s)
+	}
+}

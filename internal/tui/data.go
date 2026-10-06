@@ -197,6 +197,9 @@ func (m *model) apply() {
 			sel = i
 		}
 	}
+	if sel < 0 && m.selKey == "" {
+		sel = m.firstFuture()
+	}
 	if sel < 0 {
 		sel = min(m.sel, len(out)-1)
 	}

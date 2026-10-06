@@ -327,8 +327,16 @@ func (m *model) list(w, h, top int) []string {
 	var rows []string
 	var owners []int
 	selRow := 0
+	future := m.firstFuture()
+	nowLine := func() {
+		rows, owners = append(rows, m.nowRule(w)), append(owners, -1)
+	}
 	for gi, g := range m.groups() {
 		if gi > 0 {
+			rows, owners = append(rows, ""), append(owners, -1)
+		}
+		if g.items[0] == future {
+			nowLine()
 			rows, owners = append(rows, ""), append(owners, -1)
 		}
 		title := sSection.Render(g.title)
@@ -336,7 +344,10 @@ func (m *model) list(w, h, top int) []string {
 			title += sMuted.Render(fmt.Sprintf("  %d", len(g.items)))
 		}
 		rows, owners = append(rows, " "+title), append(owners, -1)
-		for _, i := range g.items {
+		for k, i := range g.items {
+			if i == future && k > 0 {
+				nowLine()
+			}
 			line := m.row(m.items[i], w)
 			if i == m.sel {
 				selRow = len(rows)
@@ -344,6 +355,9 @@ func (m *model) list(w, h, top int) []string {
 			}
 			rows, owners = append(rows, line), append(owners, i)
 		}
+	}
+	if future < 0 && len(m.items) > 0 && m.isPast(m.items[len(m.items)-1]) {
+		nowLine()
 	}
 	// Keep the selection visible, with its group title when it fits.
 	if selRow-2 < m.top {
@@ -756,4 +770,47 @@ func (m *model) sphereMark(sphere string) string {
 		c = cPro
 	}
 	return lipgloss.NewStyle().Foreground(c).Bold(true).Render(fmt.Sprintf("%-2s", m.cfg.Spheres[sphere].Prefix)) + " "
+}
+
+// isPast: a line whose moment is over (a date alone ends with its day). Done
+// and dropped entries are not placed in time.
+func (m *model) isPast(it connect.Item) bool {
+	if it.Type == "due" && it.State != ledger.Open {
+		return false
+	}
+	now := m.now()
+	if it.AllDay {
+		y, mo, d := it.At.Date()
+		return time.Date(y, mo, d, 23, 59, 59, 0, it.At.Location()).Before(now)
+	}
+	return it.At.Before(now)
+}
+
+// firstFuture is the first line still to come after a past one, or -1 when
+// nothing is past or nothing is to come.
+func (m *model) firstFuture() int {
+	past := false
+	for i, it := range m.items {
+		if it.Type == "due" && it.State != ledger.Open {
+			continue
+		}
+		if m.isPast(it) {
+			past = true
+			continue
+		}
+		if past {
+			return i
+		}
+		return -1
+	}
+	return -1
+}
+
+// nowRule separates what is over from what is to come.
+func (m *model) nowRule(w int) string {
+	label := " maintenant · " + shortDay(m.now(), m.now()) + " " + m.now().Format("15:04") + " "
+	left := 2
+	right := max(0, w-left-ansi.StringWidth(label)-1)
+	st := lipgloss.NewStyle().Foreground(cStopped)
+	return " " + st.Render(strings.Repeat("─", left)) + lipgloss.NewStyle().Foreground(cStopped).Bold(true).Render(label) + st.Render(strings.Repeat("─", right))
 }
