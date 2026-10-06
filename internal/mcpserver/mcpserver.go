@@ -110,12 +110,6 @@ func schemaOf(a *spec.Action, spheres []string) map[string]any {
 		help := p.Help
 		if p.Name == "sphere" {
 			t["enum"] = spheres
-			help = "Sphere to act in."
-			if len(spheres) == 1 {
-				help += " Defaults to " + spheres[0] + "."
-			} else {
-				required = append(required, p.Name)
-			}
 		}
 		if p.Default != "" {
 			help += " Default " + p.Default + "."
@@ -163,9 +157,6 @@ func New(cfgPath string, spheres []string) *mcp.Server {
 }
 
 func call(cfgPath string, a *spec.Action, spheres []string, in map[string]any) (any, error) {
-	if _, ok := in["sphere"]; !ok && len(spheres) == 1 {
-		in["sphere"] = spheres[0]
-	}
 	args, err := spec.ArgsFrom(a, in)
 	if err != nil {
 		return nil, err

@@ -13,7 +13,7 @@ func newLedger(t *testing.T, now time.Time) *Ledger {
 	if err := Init(root, "none"); err != nil {
 		t.Fatal(err)
 	}
-	return &Ledger{Sphere: "perso", Root: root, VCS: "none", By: "test", Clock: "09:00", Now: func() time.Time { return now }}
+	return &Ledger{Sphere: "perso", Prefix: "P", Root: root, VCS: "none", By: "test", Clock: "09:00", Now: func() time.Time { return now }}
 }
 
 func TestSaveAndRead(t *testing.T) {
@@ -27,10 +27,10 @@ func TestSaveAndRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ID != "E-0001" || got.Title != "Passeport" || got.Body != e.Body || got.Notice[0] != "30d" {
+	if got.ID != "PE-0001" || got.Title != "Passeport" || got.Body != e.Body || got.Notice[0] != "30d" {
 		t.Fatalf("got %+v", got)
 	}
-	if l.NextID() != "E-0002" {
+	if l.NextID() != "PE-0002" {
 		t.Fatal(l.NextID())
 	}
 }
@@ -75,5 +75,17 @@ func TestPendingRules(t *testing.T) {
 	e.Do, e.State = "tell", Done
 	if fire, _ := l.Pending(e, created.Add(time.Minute)); fire != nil {
 		t.Fatal("done entry fired")
+	}
+}
+
+func TestIDsBelongToTheirSphere(t *testing.T) {
+	l := newLedger(t, time.Now())
+	for in, want := range map[string]string{"7": "PE-0007", "pe-7": "PE-0007", "PE-0007": "PE-0007"} {
+		if got, err := l.NormID(in); err != nil || got != want {
+			t.Errorf("%s: %s %v", in, got, err)
+		}
+	}
+	if _, err := l.NormID("UE-0007"); err == nil {
+		t.Error("an id of another sphere must be refused")
 	}
 }

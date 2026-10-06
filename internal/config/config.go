@@ -22,7 +22,10 @@ type Config struct {
 }
 
 type Sphere struct {
-	Root       string      `yaml:"root"`
+	Root string `yaml:"root"`
+	// Prefix starts the ids of the sphere's entries: P gives PE-0001. Defaults
+	// to the sphere's initial; two spheres never share one.
+	Prefix     string      `yaml:"prefix,omitempty"`
 	VCS        string      `yaml:"vcs,omitempty"`     // jj (default), git, none
 	Horizon    string      `yaml:"horizon,omitempty"` // window of ls, default 30d
 	Actions    Actions     `yaml:"actions,omitempty"`
@@ -61,7 +64,10 @@ type Connector struct {
 	PastKinds   []string `yaml:"past_kinds,omitempty"`   // command: past lines kept only for these kinds
 }
 
-var sphereName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
+var (
+	sphereName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
+	prefixRe   = regexp.MustCompile(`^[A-Z]{1,3}$`)
+)
 
 var Types = []string{"reminders", "calendar", "office", "routine", "oj", "command"}
 
@@ -94,7 +100,16 @@ func Load(flag string) (*Config, error) {
 		return nil, fmt.Errorf("%s: %w", p, err)
 	}
 	c.fill()
-	for name, s := range c.Spheres {
+	owner := map[string]string{}
+	for _, name := range c.Names() {
+		s := c.Spheres[name]
+		if !prefixRe.MatchString(s.Prefix) {
+			return nil, fmt.Errorf("%s: sphere %s: prefix %q must be one to three capital letters, e.g. P", p, name, s.Prefix)
+		}
+		if other, ok := owner[s.Prefix]; ok {
+			return nil, fmt.Errorf("%s: spheres %s and %s share the prefix %s; give one of them its own, e.g. prefix: U", p, other, name, s.Prefix)
+		}
+		owner[s.Prefix] = name
 		for i, k := range s.Connectors {
 			if k.Name == "" {
 				return nil, fmt.Errorf("%s: sphere %s, connector %d has no name", p, name, i+1)
@@ -116,6 +131,10 @@ func (c *Config) fill() {
 	}
 	for name, s := range c.Spheres {
 		s.Root = Expand(s.Root)
+		if s.Prefix == "" {
+			s.Prefix = strings.ToUpper(name[:1])
+		}
+		s.Prefix = strings.ToUpper(s.Prefix)
 		if s.VCS == "" {
 			s.VCS = "jj"
 		}
@@ -187,4 +206,15 @@ func contains(l []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// SphereOfID finds the sphere whose prefix starts an entry id (PE-0001 → perso).
+func (c *Config) SphereOfID(id string) (string, bool) {
+	id = strings.ToUpper(strings.TrimSpace(id))
+	for _, name := range c.Names() {
+		if strings.HasPrefix(id, c.Spheres[name].Prefix+"E-") {
+			return name, true
+		}
+	}
+	return "", false
 }

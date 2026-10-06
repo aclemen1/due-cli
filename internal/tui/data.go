@@ -51,34 +51,37 @@ func waitWatch(w *watch.Watcher) tea.Cmd {
 	return func() tea.Msg { return watchMsg{<-w.C} }
 }
 
-// loadLedger reads every entry of the ledger, with its detail.
+// loadLedger reads every entry of the ledgers, with its detail; ids are unique across spheres.
 func (m *model) loadLedger() tea.Cmd {
 	m.loading["due"] = true
 	ctx := m.ctx(map[string]any{})
+	spheres := m.spheres
 	return func() tea.Msg {
-		_, l, err := actions.Open(ctx)
-		if err != nil {
-			return ledgerMsg{err: err}
-		}
-		entries, err := l.List()
-		if err != nil {
-			return ledgerMsg{err: err}
-		}
 		out := ledgerMsg{details: map[string]*actions.Detail{}}
-		for _, e := range entries {
-			d := actions.DetailOf(l, e)
-			out.details[e.ID] = &d
-			out.items = append(out.items, actions.ItemOf(l, e))
+		for _, sp := range spheres {
+			l, err := actions.OpenLedger(ctx, m.cfg, sp)
+			if err != nil {
+				return ledgerMsg{err: err}
+			}
+			entries, err := l.List()
+			if err != nil {
+				return ledgerMsg{err: err}
+			}
+			for _, e := range entries {
+				d := actions.DetailOf(l, e)
+				out.details[e.ID] = &d
+				out.items = append(out.items, actions.ItemOf(l, e))
+			}
 		}
 		return out
 	}
 }
 
-// loadConn reads one connector over the horizon.
-func (m *model) loadConn(name string) tea.Cmd {
-	var c *config.Connector
+// loadConn reads one connector, by its key <sphere>/<name>, over the horizon.
+func (m *model) loadConn(key string) tea.Cmd {
+	var c *conn
 	for _, x := range m.connectors() {
-		if x.Name == name {
+		if x.key() == key {
 			x := x
 			c = &x
 		}
@@ -86,13 +89,16 @@ func (m *model) loadConn(name string) tea.Cmd {
 	if c == nil {
 		return nil
 	}
-	m.loading[name] = true
+	m.loading[key] = true
 	now := m.now()
 	until, _ := when.Horizon(horizons[m.horizon], now, m.cfg.DefaultTime)
-	w := connect.Window{Until: until, Now: now, Sphere: m.sphere}
+	w := connect.Window{Until: until, Now: now, Sphere: c.sphere}
 	return func() tea.Msg {
-		items, err := connect.One(*c, w)
-		return connMsg{name: name, items: items, err: err}
+		items, err := connect.One(c.c, w)
+		for i := range items {
+			items[i].Sphere = c.sphere
+		}
+		return connMsg{name: key, items: items, err: err}
 	}
 }
 
@@ -100,7 +106,7 @@ func (m *model) loadAll() tea.Cmd {
 	m.lastFull = m.now()
 	var cmds []tea.Cmd
 	for _, c := range m.connectors() {
-		cmds = append(cmds, m.loadConn(c.Name))
+		cmds = append(cmds, m.loadConn(c.key()))
 	}
 	return tea.Batch(cmds...)
 }
@@ -114,9 +120,8 @@ func (m *model) busy() bool {
 	return false
 }
 
-// act runs an action of the ledger, as `due <name>` would.
+// act runs an action of the ledger, as `due <name>` would; args carry the sphere it writes to.
 func (m *model) act(name string, args map[string]any, status string) tea.Cmd {
-	args["sphere"] = m.sphere
 	return func() tea.Msg {
 		a := spec.Find("due", name)
 		parsed, err := spec.ArgsFrom(a, args)
@@ -157,10 +162,12 @@ func (m *model) apply() {
 			}
 		}
 		for _, c := range m.connectors() {
-			out = append(out, m.conn[c.Name]...)
+			out = append(out, m.conn[c.key()]...)
 		}
 	default:
-		out = append(out, m.conn[m.sourceName()]...)
+		for _, k := range m.keysOf(m.sourceName()) {
+			out = append(out, m.conn[k]...)
+		}
 	}
 	if m.filter != "" {
 		needle := strings.ToLower(m.filter)
@@ -222,7 +229,7 @@ type savedState struct {
 }
 
 func (m *model) statePath() string {
-	return filepath.Join(config.StateDir(), "tui-"+m.sphere+".json")
+	return filepath.Join(config.StateDir(), "tui-"+strings.Join(m.spheres, "+")+".json")
 }
 
 func (m *model) persist() {

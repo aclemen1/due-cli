@@ -24,40 +24,41 @@ type Root struct {
 	Keep   func(path string) bool
 }
 
-// Polled lists the sources with nothing to watch.
-func Polled(s config.Sphere) []string {
+// Polled lists the sources with nothing to watch, as <sphere>/<name>.
+func Polled(s config.Sphere, sphere string) []string {
 	var out []string
 	for _, c := range s.Connectors {
 		if !c.Off && (c.Type == "reminders" || c.Type == "calendar" || c.Type == "command") {
-			out = append(out, c.Name)
+			out = append(out, sphere+"/"+c.Name)
 		}
 	}
 	return out
 }
 
-// Roots are the trees to watch for a sphere.
+// Roots are the trees to watch for a sphere; their sources read <sphere>/<name>, <sphere>/due for the ledger.
 func Roots(s config.Sphere, sphere string) []Root {
 	home, _ := os.UserHomeDir()
 	md := func(p string) bool { return strings.HasSuffix(p, ".md") }
-	roots := []Root{{Source: "due", Dir: s.Root, Depth: 0, Keep: func(p string) bool {
+	roots := []Root{{Source: sphere + "/due", Dir: s.Root, Depth: 0, Keep: func(p string) bool {
 		return strings.HasPrefix(filepath.Base(p), "E-") && md(p)
 	}}}
 	for _, c := range s.Connectors {
 		if c.Off {
 			continue
 		}
+		src := sphere + "/" + c.Name
 		switch c.Type {
 		case "office":
 			if c.Office != "" {
-				roots = append(roots, Root{c.Name, c.Office, 1, func(p string) bool { return filepath.Base(p) == "dossier.md" }})
+				roots = append(roots, Root{src, c.Office, 1, func(p string) bool { return filepath.Base(p) == "dossier.md" }})
 			}
 		case "routine":
 			roots = append(roots,
-				Root{c.Name, filepath.Join(home, ".config", "routine", "tasks"), 2, md},
-				Root{c.Name, filepath.Join(home, ".local", "state", "routine", "tasks"), 2, func(p string) bool { return strings.HasSuffix(p, ".json") }})
+				Root{src, filepath.Join(home, ".config", "routine", "tasks"), 2, md},
+				Root{src, filepath.Join(home, ".local", "state", "routine", "tasks"), 2, func(p string) bool { return strings.HasSuffix(p, ".json") }})
 		case "oj":
 			if dir := ojRoot(c, sphere); dir != "" {
-				roots = append(roots, Root{c.Name, dir, 3, func(p string) bool {
+				roots = append(roots, Root{src, dir, 3, func(p string) bool {
 					return md(p) || strings.HasSuffix(p, ".yaml")
 				}})
 			}

@@ -105,6 +105,7 @@ func (e *Entry) HasFired(i Instant) bool {
 
 type Ledger struct {
 	Sphere  string
+	Prefix  string // ids are <Prefix>E-0001
 	Root    string
 	VCS     string
 	By      string
@@ -126,7 +127,7 @@ func OpenLedger(cfg *config.Config, sphere, by string) (*Ledger, error) {
 	if by == "" {
 		by = "user"
 	}
-	return &Ledger{Sphere: sphere, Root: s.Root, VCS: s.VCS, By: by, Clock: cfg.DefaultTime, Actions: s.Actions, Now: time.Now,
+	return &Ledger{Sphere: sphere, Prefix: s.Prefix, Root: s.Root, VCS: s.VCS, By: by, Clock: cfg.DefaultTime, Actions: s.Actions, Now: time.Now,
 		Warn: func(m string) { fmt.Fprintln(os.Stderr, "due: warning: "+m) }}, nil
 }
 
@@ -219,24 +220,31 @@ func (l *Ledger) Note(e *Entry, what string) {
 	e.Log = append(e.Log, LogEntry{At: l.Now().Format(time.RFC3339), By: l.By, What: what})
 }
 
-var idRe = regexp.MustCompile(`^E-(\d{4,})$`)
+var numRe = regexp.MustCompile(`^(?:([A-Z]{1,3})E-)?0*(\d+)$`)
 
-// NormID accepts E-0007, e-7 or 7.
-func NormID(s string) (string, error) {
-	s = strings.ToUpper(strings.TrimSpace(s))
-	s = strings.TrimPrefix(s, "E-")
-	n, err := strconv.Atoi(s)
-	if err != nil || n <= 0 {
-		return "", spec.UserError("entry id %q: expected E-0007 or 7", s)
+// NormID accepts PE-0007, pe-7 or 7 in the ledger of prefix P; an id of another sphere is refused.
+func (l *Ledger) NormID(s string) (string, error) {
+	m := numRe.FindStringSubmatch(strings.ToUpper(strings.TrimSpace(s)))
+	if m == nil || m[2] == "0" {
+		return "", spec.UserError("entry id %q: expected %sE-0007 or 7", s, l.Prefix)
 	}
-	return fmt.Sprintf("E-%04d", n), nil
+	if m[1] != "" && m[1] != l.Prefix {
+		return "", spec.UserError("entry %s is not in sphere %s, whose ids start with %sE-", strings.ToUpper(s), l.Sphere, l.Prefix)
+	}
+	n, _ := strconv.Atoi(m[2])
+	return l.ID(n), nil
 }
+
+// ID is the id of the nth entry of the ledger.
+func (l *Ledger) ID(n int) string { return fmt.Sprintf("%sE-%04d", l.Prefix, n) }
+
+func (l *Ledger) glob() string { return filepath.Join(l.Root, l.Prefix+"E-*.md") }
 
 func (l *Ledger) path(id string) string { return filepath.Join(l.Root, id+".md") }
 
 // List reads every entry, in time order.
 func (l *Ledger) List() ([]*Entry, error) {
-	files, err := filepath.Glob(filepath.Join(l.Root, "E-*.md"))
+	files, err := filepath.Glob(l.glob())
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +272,7 @@ func (l *Ledger) List() ([]*Entry, error) {
 
 // Get reads one entry.
 func (l *Ledger) Get(id string) (*Entry, error) {
-	id, err := NormID(id)
+	id, err := l.NormID(id)
 	if err != nil {
 		return nil, err
 	}
@@ -277,16 +285,16 @@ func (l *Ledger) Get(id string) (*Entry, error) {
 
 // NextID is one more than the highest id in the ledger.
 func (l *Ledger) NextID() string {
-	files, _ := filepath.Glob(filepath.Join(l.Root, "E-*.md"))
+	files, _ := filepath.Glob(l.glob())
 	max := 0
 	for _, f := range files {
-		if m := idRe.FindStringSubmatch(strings.TrimSuffix(filepath.Base(f), ".md")); m != nil {
-			if n, _ := strconv.Atoi(m[1]); n > max {
+		if m := numRe.FindStringSubmatch(strings.TrimSuffix(filepath.Base(f), ".md")); m != nil {
+			if n, _ := strconv.Atoi(m[2]); n > max {
 				max = n
 			}
 		}
 	}
-	return fmt.Sprintf("E-%04d", max+1)
+	return l.ID(max + 1)
 }
 
 // Save writes the entry's file.

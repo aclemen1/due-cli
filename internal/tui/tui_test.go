@@ -90,7 +90,7 @@ func setup(t *testing.T) *model {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := newModel(cfgPath, cfg, "perso")
+	m := newModel(cfgPath, cfg, []string{"perso"})
 	m.w, m.h = 130, 32
 	drive(t, m, m.loadLedger())
 	return m
@@ -147,7 +147,7 @@ func TestFormEditsTheEntry(t *testing.T) {
 	}
 	typeText(t, m, " d'Eve")
 	press(t, m, "ctrl+s")
-	if s := screen(m); !strings.Contains(s, "Passeport d'Eve") || !strings.Contains(s, "E-0001 modifiée") {
+	if s := screen(m); !strings.Contains(s, "Passeport d'Eve") || !strings.Contains(s, "PE-0001 modifiée") {
 		t.Fatalf("after edit:\n%s", s)
 	}
 }
@@ -209,5 +209,56 @@ func TestNarrowStacksTheDetail(t *testing.T) {
 	press(t, m, "tab")
 	if s := screen(m); strings.Contains(s, "Calendrier") {
 		t.Fatalf("tab hides the detail:\n%s", s)
+	}
+}
+
+func TestTwoSpheresAndTheFormAsksWhich(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DUE_STATE", filepath.Join(dir, "state"))
+	var conf strings.Builder
+	conf.WriteString("spheres:\n")
+	for _, sp := range []struct{ name, prefix string }{{"perso", "P"}, {"pro", "U"}} {
+		root := filepath.Join(dir, sp.name)
+		if err := ledger.Init(root, "none"); err != nil {
+			t.Fatal(err)
+		}
+		conf.WriteString("  " + sp.name + ":\n    root: " + root + "\n    vcs: none\n    prefix: " + sp.prefix + "\n")
+	}
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(conf.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 7, 10, 0, 0, 0, time.Local)
+	actions.SetClock(func() time.Time { return now })
+	t.Cleanup(func() { actions.SetClock(nil) })
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newModel(cfgPath, cfg, cfg.Names())
+	m.w, m.h = 130, 32
+	drive(t, m, m.loadLedger())
+
+	press(t, m, "a")
+	if s := screen(m); !strings.Contains(s, "Sphère") || !strings.Contains(s, "à choisir") {
+		t.Fatalf("the form asks for the sphere:\n%s", s)
+	}
+	press(t, m, "tab")
+	typeText(t, m, "Renouveler le contrat cloud")
+	press(t, m, "tab")
+	typeText(t, m, "31.03.2027")
+	press(t, m, "ctrl+s")
+	if m.form == nil || !strings.Contains(m.form.err, "sphère") {
+		t.Fatal("no default sphere: saving without one is refused")
+	}
+	press(t, m, "l")
+	press(t, m, "l")
+	press(t, m, "ctrl+s")
+	if m.form != nil {
+		t.Fatalf("form still open: %s", m.form.err)
+	}
+	s := screen(m)
+	if !strings.Contains(s, "UE-0001") || !strings.Contains(s, "perso + pro") || !strings.Contains(s, "U  ") {
+		t.Fatalf("the entry goes to pro and shows its sphere:\n%s", s)
 	}
 }

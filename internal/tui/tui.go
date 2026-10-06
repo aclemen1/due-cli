@@ -25,21 +25,25 @@ import (
 func init() {
 	spec.Register(&spec.Action{
 		Category: "setup", Name: "tui", Top: true,
-		Summary:  "Open the terminal interface on a sphere: the ledger, every source, the detail of a line, a form to add and edit.",
-		Params:   []spec.Param{{Name: "sphere", Kind: spec.String, Help: "Sphere to show. Defaults to $DUE_SPHERE."}},
+		Summary:  "Open the terminal interface: the ledgers, every source, the detail of a line, a form to add and edit.",
+		Params:   []spec.Param{{Name: "sphere", Kind: spec.String, Help: "Show only this sphere. Defaults to $DUE_SPHERE, else every sphere."}},
 		Effects:  []string{"Runs until q; every change goes through the same actions as the CLI."},
-		Examples: []string{"due tui --sphere perso"},
+		Examples: []string{"due tui", "due tui --sphere pro"},
 		Run: func(ctx *spec.Context) (any, error) {
 			cfg, err := config.Load(ctx.Config)
 			if err != nil {
 				return nil, err
 			}
-			sphere, err := actions.SphereOf(ctx, cfg)
+			spheres, err := actions.ReadSpheres(ctx, cfg)
 			if err != nil {
 				return nil, err
 			}
-			m := newModel(ctx.Config, cfg, sphere)
-			if w, err := watch.Start(watch.Roots(cfg.Spheres[sphere], sphere), 300*time.Millisecond); err == nil {
+			m := newModel(ctx.Config, cfg, spheres)
+			var roots []watch.Root
+			for _, sp := range spheres {
+				roots = append(roots, watch.Roots(cfg.Spheres[sp], sp)...)
+			}
+			if w, err := watch.Start(roots, 300*time.Millisecond); err == nil {
 				m.watcher = w
 				defer w.Close()
 			}
@@ -72,7 +76,7 @@ const (
 type model struct {
 	cfgPath string
 	cfg     *config.Config
-	sphere  string
+	spheres []string
 	now     func() time.Time
 	watcher *watch.Watcher
 
@@ -117,35 +121,60 @@ type model struct {
 	tabX                       []int
 }
 
-func newModel(cfgPath string, cfg *config.Config, sphere string) *model {
+func newModel(cfgPath string, cfg *config.Config, spheres []string) *model {
 	in := textinput.New()
 	in.Prompt = ""
-	m := &model{cfgPath: cfgPath, cfg: cfg, sphere: sphere, now: actions.Now, input: in, w: 100, h: 30, horizon: 1,
+	m := &model{cfgPath: cfgPath, cfg: cfg, spheres: spheres, now: actions.Now, input: in, w: 100, h: 30, horizon: 1,
 		detailOn: true, details: map[string]*actions.Detail{}, conn: map[string][]connect.Item{},
 		connErr: map[string]string{}, loading: map[string]bool{}}
 	for i, x := range horizons {
-		if x == cfg.Spheres[sphere].Horizon {
+		if x == cfg.Spheres[spheres[0]].Horizon {
 			m.horizon = i
 		}
 	}
 	return m
 }
 
-func (m *model) connectors() []config.Connector {
-	var out []config.Connector
-	for _, c := range m.cfg.Spheres[m.sphere].Connectors {
-		if !c.Off {
-			out = append(out, c)
+// conn is a connector of a sphere; its key is <sphere>/<name>.
+type conn struct {
+	sphere string
+	c      config.Connector
+}
+
+func (c conn) key() string { return c.sphere + "/" + c.c.Name }
+
+func (m *model) connectors() []conn {
+	var out []conn
+	for _, sp := range m.spheres {
+		for _, c := range m.cfg.Spheres[sp].Connectors {
+			if !c.Off {
+				out = append(out, conn{sp, c})
+			}
 		}
 	}
 	return out
 }
 
+// keysOf are the connectors of every sphere that carry a name.
+func (m *model) keysOf(name string) []string {
+	var out []string
+	for _, c := range m.connectors() {
+		if c.c.Name == name {
+			out = append(out, c.key())
+		}
+	}
+	return out
+}
+
+func (m *model) multi() bool { return len(m.spheres) > 1 }
+
 // views are the sources shown in turn by s: the ledger alone, everything, then each connector.
 func (m *model) views() []string {
 	out := []string{"registre", "toutes"}
 	for _, c := range m.connectors() {
-		out = append(out, c.Name)
+		if !contains(out, c.c.Name) {
+			out = append(out, c.c.Name)
+		}
 	}
 	return out
 }
@@ -156,7 +185,6 @@ func (m *model) sourceName() string { return m.views()[m.source] }
 func (m *model) ledgerOnly() bool { return m.source == 0 }
 
 func (m *model) ctx(args map[string]any) *spec.Context {
-	args["sphere"] = m.sphere
 	return &spec.Context{Args: args, Config: m.cfgPath, Format: "json"}
 }
 
@@ -214,14 +242,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.now().Sub(m.lastFull) > fullEvery {
 			cmds = append(cmds, m.loadLedger(), m.loadAll())
 		} else {
-			for _, name := range watch.Polled(m.cfg.Spheres[m.sphere]) {
-				cmds = append(cmds, m.loadConn(name))
+			for _, sp := range m.spheres {
+				for _, key := range watch.Polled(m.cfg.Spheres[sp], sp) {
+					cmds = append(cmds, m.loadConn(key))
+				}
 			}
 		}
 		return m, tea.Batch(append(cmds, poll())...)
 	case watchMsg:
 		var cmd tea.Cmd
-		if msg.source == "due" {
+		if strings.HasSuffix(msg.source, "/due") {
 			cmd = m.loadLedger()
 		} else {
 			cmd = m.loadConn(msg.source)
@@ -386,9 +416,9 @@ func (m *model) keyEntry(key string) tea.Cmd {
 	switch key {
 	case "d":
 		if it.State != "open" {
-			return m.act("reopen", map[string]any{"id": it.ID}, it.ID+" rouverte")
+			return m.act("reopen", map[string]any{"id": it.ID, "sphere": it.Sphere}, it.ID+" rouverte")
 		}
-		return m.act("done", map[string]any{"id": it.ID}, it.ID+" faite")
+		return m.act("done", map[string]any{"id": it.ID, "sphere": it.Sphere}, it.ID+" faite")
 	case "x":
 		return m.ask(pConfirmDrop, "o pour abandonner « "+it.Title+" »", "")
 	case "D":
@@ -403,7 +433,7 @@ func (m *model) keyEntry(key string) tea.Cmd {
 			return m.form.focus()
 		}
 	case "E":
-		return m.editFile(it.ID)
+		return m.editFile(it)
 	}
 	return nil
 }
@@ -416,8 +446,8 @@ func (m *model) open(it connect.Item) tea.Cmd {
 		return nil
 	case "office":
 		for _, c := range m.connectors() {
-			if c.Name == it.Source {
-				dir := c.Office
+			if c.c.Name == it.Source && c.sphere == it.Sphere {
+				dir := c.c.Office
 				return func() tea.Msg {
 					args := []string{"goto", it.ID}
 					if dir != "" {
@@ -437,8 +467,9 @@ func (m *model) open(it connect.Item) tea.Cmd {
 	return nil
 }
 
-func (m *model) editFile(id string) tea.Cmd {
-	s := m.cfg.Spheres[m.sphere]
+func (m *model) editFile(it connect.Item) tea.Cmd {
+	id := it.ID
+	s := m.cfg.Spheres[it.Sphere]
 	path := filepath.Join(s.Root, id+".md")
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
@@ -496,7 +527,7 @@ func (m *model) submit(p prompt, v string) tea.Cmd {
 		if v == "" {
 			return nil
 		}
-		args := map[string]any{"id": it.ID}
+		args := map[string]any{"id": it.ID, "sphere": it.Sphere}
 		if _, err := when.ParseDuration(v); err == nil {
 			args["by"] = v
 		} else {
@@ -505,15 +536,15 @@ func (m *model) submit(p prompt, v string) tea.Cmd {
 		return m.act("snooze", args, it.ID+" reportée")
 	case pConfirmDrop:
 		if yes {
-			return m.act("drop", map[string]any{"id": it.ID}, it.ID+" abandonnée")
+			return m.act("drop", map[string]any{"id": it.ID, "sphere": it.Sphere}, it.ID+" abandonnée")
 		}
 	case pConfirmRm:
 		if yes {
-			return m.act("rm", map[string]any{"id": it.ID}, it.ID+" supprimée")
+			return m.act("rm", map[string]any{"id": it.ID, "sphere": it.Sphere}, it.ID+" supprimée")
 		}
 	case pConfirmRun:
 		if yes {
-			return m.act("run", map[string]any{"id": it.ID}, it.ID+" exécutée")
+			return m.act("run", map[string]any{"id": it.ID, "sphere": it.Sphere}, it.ID+" exécutée")
 		}
 	}
 	return nil
@@ -555,4 +586,13 @@ func (m *model) mouse(ev tea.MouseMsg) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+func contains(l []string, s string) bool {
+	for _, x := range l {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }

@@ -11,10 +11,10 @@ Run `due schema` for the catalog, `due schema due <action>` for one action.
 ## Read
 
 ```bash
-due ls --sphere perso --format text            # horizon of the sphere (30d)
-due ls --until 7d --sphere perso
-due ls --source due --all --sphere perso       # the ledger only, done included
-due show E-0007 --sphere perso
+due ls --format text                          # every sphere, horizon 30d
+due ls --until 7d --sphere pro                 # one sphere
+due ls --source due --all                      # the ledgers only, done included
+due show PE-0007                               # P: perso, U: pro
 ```
 
 - A line from a connector (`source` ≠ `due`) belongs to its tool: change it there (macos, office, routine, oj).
@@ -44,9 +44,11 @@ due done 7 --note "<résultat>" --sphere perso
 | `--ref` | what the entry belongs to, e.g. `office:P-0040` |
 
 - An entry with `--do agent` or `--do command` runs without review at its date: create one only after the user's agreement.
-- Spheres never mix: always pass `--sphere`.
+- Reads cover every sphere unless `--sphere` narrows them; each line names its sphere.
+- Writes need `--sphere`, chosen by what the entry is about (pro for work, perso otherwise); never a default, not even `$DUE_SPHERE`.
+- Ids carry their sphere: `PE-0007` (perso), `UE-0007` (pro); a bare `7` needs `--sphere`.
 
 ## Firing
 
 The launch agent `aero.clement.due` runs `due tick` every minute. `due launcher status|stop|start`.
-Missed instants fire once, the latest only. `due run 7` fires by hand.
+Missed instants fire once, the latest only. `due run PE-0007 --sphere perso` fires by hand.

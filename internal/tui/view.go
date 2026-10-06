@@ -93,7 +93,11 @@ func (m *model) panes(w, h, top int) []string {
 
 func (m *model) header(w int) []string {
 	open, late, next := m.counts()
-	left := sTitle.Render("due") + sMuted.Render(" · ") + sphereTag(m.sphere)
+	var tags []string
+	for _, sp := range m.spheres {
+		tags = append(tags, sphereTag(sp))
+	}
+	left := sTitle.Render("due") + sMuted.Render(" · ") + strings.Join(tags, sMuted.Render(" + "))
 	var facts []string
 	facts = append(facts, sText.Render(plural(open, "échéance ouverte", "échéances ouvertes")))
 	if late > 0 {
@@ -132,7 +136,7 @@ func (m *model) header(w int) []string {
 		st := sMuted
 		if i == m.source {
 			st = lipgloss.NewStyle().Bold(true).Foreground(cText).Background(cSel)
-		} else if _, bad := m.connErr[v]; bad {
+		} else if m.failed(v) {
 			st = lipgloss.NewStyle().Foreground(cStopped)
 		}
 		m.tabX = append(m.tabX, x)
@@ -167,11 +171,15 @@ func (m *model) badge(view int) string {
 	case 1:
 		return ""
 	}
-	name := m.views()[view]
-	if m.loading[name] && m.conn[name] == nil {
+	n, pending := 0, false
+	for _, k := range m.keysOf(m.views()[view]) {
+		n += len(m.conn[k])
+		pending = pending || (m.loading[k] && m.conn[k] == nil)
+	}
+	if pending && n == 0 {
 		return "…"
 	}
-	return fmt.Sprint(len(m.conn[name]))
+	return fmt.Sprint(n)
 }
 
 func (m *model) footer(w int) string {
@@ -405,9 +413,9 @@ func (m *model) row(it connect.Item, w int) string {
 	if !m.ledgerOnly() {
 		src = sourceStyle(it).Render(fmt.Sprintf("%-9s", trunc(it.Source, 9))) + " "
 	}
-	line := fmt.Sprintf(" %s %s  %s%s", dot, sMuted.Render(date), src, title)
+	line := fmt.Sprintf(" %s %s %s %s%s", dot, m.sphereMark(it.Sphere), sMuted.Render(date), src, title)
 	if m.ledgerOnly() {
-		line = fmt.Sprintf(" %s %s %s %s", dot, sText.Render(date), urg.Render(rel), title)
+		line = fmt.Sprintf(" %s %s%s %s %s", dot, m.sphereMark(it.Sphere), sText.Render(date), urg.Render(rel), title)
 	}
 	if tail != "" {
 		room := w - ansi.StringWidth(line) - 3
@@ -480,6 +488,7 @@ func (m *model) lineDetail(it connect.Item, w int) []string {
 		" " + urgency(it.At, now, it.Late).Render(when_+" · "+when.Until(it.At, now)),
 		"",
 		field("source", sourceStyle(it).Render(it.Source)+sMuted.Render(" ("+it.Type+")")),
+		field("sphère", sphereTag(it.Sphere)),
 		field("id", sText.Render(it.ID)),
 	}
 	if it.Detail != "" {
@@ -516,7 +525,7 @@ func (m *model) entryDetail(it connect.Item, w int) []string {
 	state := map[string]string{ledger.Open: "ouverte", ledger.Done: "faite", ledger.Dropped: "abandonnée"}[e.State]
 	out := []string{
 		" " + sKey.Render(e.ID) + "  " + sBold.Render(trunc(e.Title, w-12)),
-		" " + urg.Render(day+" · "+when.Until(d.Term, now)) + sMuted.Render("  ·  "+state),
+		" " + urg.Render(day+" · "+when.Until(d.Term, now)) + sMuted.Render("  ·  "+state+"  ·  ") + sphereTag(d.Sphere),
 	}
 	if e.Ref != "" {
 		out = append(out, " "+sMuted.Render("réf. ")+sText.Render(e.Ref))
@@ -722,4 +731,29 @@ func plural(n int, one, many string) string {
 		return "1 " + one
 	}
 	return fmt.Sprintf("%d %s", n, many)
+}
+
+// failed says whether a view's connector failed in a sphere.
+func (m *model) failed(view string) bool {
+	for _, k := range m.keysOf(view) {
+		if _, bad := m.connErr[k]; bad {
+			return true
+		}
+	}
+	return false
+}
+
+// sphereMark is the sphere's prefix in its colour, shown when several spheres are.
+func (m *model) sphereMark(sphere string) string {
+	if !m.multi() {
+		return ""
+	}
+	c := color.Color(cOther)
+	switch sphere {
+	case "perso":
+		c = cPerso
+	case "pro":
+		c = cPro
+	}
+	return lipgloss.NewStyle().Foreground(c).Bold(true).Render(fmt.Sprintf("%-2s", m.cfg.Spheres[sphere].Prefix)) + " "
 }

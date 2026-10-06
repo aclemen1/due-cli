@@ -25,12 +25,16 @@ type form struct {
 	fields map[string]*textinput.Model
 	focusI int
 	do     int
+	sphere int // index in m.spheres; -1 until chosen
 	err    string
 	w      int
 }
 
 func newForm(m *model, edit *actions.Detail) *form {
-	f := &form{m: m, edit: edit, fields: map[string]*textinput.Model{}}
+	f := &form{m: m, edit: edit, fields: map[string]*textinput.Model{}, sphere: -1}
+	if len(m.spheres) == 1 {
+		f.sphere = 0
+	}
 	place := map[string]string{
 		"title": "ce qui arrive à échéance", "at": "15.11.2026, 2026-11-15 14:00, demain, 3w",
 		"notice": "30d,7d,1d (facultatif)", "run": "commande shell", "ref": "office:P-0040 (facultatif)",
@@ -68,6 +72,9 @@ func newForm(m *model, edit *actions.Detail) *form {
 
 func (f *form) order() []string {
 	o := []string{"title", "at", "notice", "do"}
+	if f.edit == nil && len(f.m.spheres) > 1 {
+		o = append([]string{"sphere"}, o...)
+	}
 	if doValues[f.do] == "command" {
 		o = append(o, "run")
 	}
@@ -119,6 +126,17 @@ func (m *model) keyForm(k tea.KeyPressMsg) tea.Cmd {
 		}
 		return f.move(1)
 	}
+	if f.current() == "sphere" {
+		n := len(m.spheres)
+		switch k.String() {
+		case "left", "h":
+			f.sphere = (max(f.sphere, 0) + n - 1) % n
+		case "right", "l", "space":
+			f.sphere = (f.sphere + 1) % n
+		}
+		f.err = ""
+		return nil
+	}
 	if f.current() == "do" {
 		switch k.String() {
 		case "left", "h":
@@ -152,28 +170,42 @@ func (f *form) notices() ([]string, error) {
 	return out, nil
 }
 
+// fail shows an error and moves to the field at fault.
+func (f *form) fail(name, msg string) tea.Cmd {
+	f.err = msg
+	for i, n := range f.order() {
+		if n == name {
+			f.focusI = i
+		}
+	}
+	return f.focus()
+}
+
 func (f *form) save() tea.Cmd {
+	if f.edit == nil && f.sphere < 0 {
+		return f.fail("sphere", "choisissez la sphère avec ← → : elle suit la nature de l'échéance, pro pour le travail")
+	}
 	title := f.val("title")
 	if title == "" {
-		f.err, f.focusI = "il faut un titre", 0
-		return f.focus()
+		return f.fail("title", "il faut un titre")
 	}
 	if _, err := when.ParseMoment(f.val("at"), f.m.now()); err != nil {
-		f.err, f.focusI = "date illisible : 15.11.2026, 2026-11-15 14:00, demain ou 3w", 1
-		return f.focus()
+		return f.fail("at", "date illisible : 15.11.2026, 2026-11-15 14:00, demain ou 3w")
 	}
 	ns, err := f.notices()
 	if err != nil {
-		f.err, f.focusI = err.Error(), 2
-		return f.focus()
+		return f.fail("notice", err.Error())
 	}
 	do := doValues[f.do]
 	if do == "command" && f.val("run") == "" {
-		f.err = "une action « commande » demande la commande à lancer"
-		f.focusI = 4
-		return f.focus()
+		return f.fail("run", "une action « commande » demande la commande à lancer")
 	}
 	args := map[string]any{"title": title, "at": f.val("at"), "ref": f.val("ref"), "body": f.val("body")}
+	if f.edit != nil {
+		args["sphere"] = f.edit.Sphere
+	} else {
+		args["sphere"] = f.m.spheres[f.sphere]
+	}
 	if do == "command" {
 		args["run"] = f.val("run")
 	}
@@ -208,6 +240,9 @@ func (f *form) save() tea.Cmd {
 func (f *form) footer() string {
 	if f.err != "" {
 		return sErr.Render("✗ " + f.err)
+	}
+	if f.current() == "sphere" {
+		return helpLine("← →", "choisir la sphère", "tab", "champ suivant", "esc", "annuler")
 	}
 	if f.current() == "do" {
 		return helpLine("← →", "choisir l'action", "tab", "champ suivant", "ctrl+s", "enregistrer", "esc", "annuler")
@@ -272,7 +307,7 @@ func (f *form) preview(name string) string {
 }
 
 func (f *form) view(w, h int) []string {
-	labels := map[string]string{"title": "Titre", "at": "Date", "notice": "Préavis", "do": "Au terme",
+	labels := map[string]string{"sphere": "Sphère", "title": "Titre", "at": "Date", "notice": "Préavis", "do": "Au terme",
 		"run": "Commande", "ref": "Dossier", "body": "Message"}
 	if doValues[f.do] == "agent" {
 		labels["body"] = "Prompt"
@@ -285,7 +320,20 @@ func (f *form) view(w, h int) []string {
 			ls = sKey
 		}
 		var value string
-		if name == "do" {
+		if name == "sphere" {
+			var opts []string
+			for j, sp := range f.m.spheres {
+				if j == f.sphere {
+					opts = append(opts, lipgloss.NewStyle().Bold(true).Foreground(cText).Background(cSel).Render(" "+sp+" "))
+				} else {
+					opts = append(opts, sMuted.Render(" "+sp+" "))
+				}
+			}
+			value = strings.Join(opts, " ")
+			if f.sphere < 0 {
+				value += sWarn.Render("  à choisir")
+			}
+		} else if name == "do" {
 			var opts []string
 			for j, l := range doLabels {
 				if j == f.do {

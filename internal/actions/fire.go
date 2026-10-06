@@ -21,7 +21,7 @@ func registerFire() {
 		Params: []spec.Param{
 			idParam(),
 			{Name: "notice", Kind: spec.Bool, Help: "Send the notice message instead of running the action."},
-			sphereParam(),
+			writeSphereParam(),
 		},
 		Effects:  []string{"Runs the action or the tell command of the sphere.", "Records the firing in the entry and commits."},
 		Examples: []string{"due run 7 --sphere perso", "due run 7 --notice --sphere perso"},

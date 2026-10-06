@@ -20,6 +20,7 @@ import (
 
 // Item is a line of the unified list, from due's ledger or a connector.
 type Item struct {
+	Sphere string    `json:"sphere"`
 	Source string    `json:"source"` // due, or the connector's name
 	Type   string    `json:"type"`   // due, reminders, calendar, office, routine, oj, command
 	ID     string    `json:"id"`     // id in its source

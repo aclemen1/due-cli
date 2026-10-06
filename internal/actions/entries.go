@@ -6,13 +6,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aclemen1/due-cli/internal/config"
 	"github.com/aclemen1/due-cli/internal/ledger"
 	"github.com/aclemen1/due-cli/internal/spec"
 	"github.com/aclemen1/due-cli/internal/when"
 )
 
 func idParam() spec.Param {
-	return spec.Param{Name: "id", Kind: spec.String, Positional: true, Required: true, Help: "Entry id, e.g. E-0007 or 7."}
+	return spec.Param{Name: "id", Kind: spec.String, Positional: true, Required: true, Help: "Entry id, e.g. PE-0007 (P: perso), UE-0007 (U: pro), or 7 with --sphere."}
 }
 
 func notices(ctx *spec.Context) ([]string, error) {
@@ -95,10 +96,11 @@ func registerEntries() {
 			{Name: "cwd", Kind: spec.String, Help: "Directory of the action. Defaults to the home directory."},
 			{Name: "ref", Kind: spec.String, Help: "What the entry belongs to, e.g. office:P-0040."},
 			{Name: "body", Kind: spec.String, Help: "Message or prompt; - reads stdin."},
-			sphereParam(),
+			writeSphereParam(),
 		},
 		Effects: entryEffects,
 		Examples: []string{
+			`due add "Renouveler le contrat de maintenance" --at 2027-03-31 --notice 60d,14d --sphere pro`,
 			`due add "Renouveler le passeport" --at 2026-12-01 --notice 30d,7d --sphere perso`,
 			`due add "Résilier l'abonnement" --at 15.11.2026 --notice 7d,1d --do tell --sphere perso`,
 			`due add "Relancer la gérance" --at 2026-10-20 --do agent --cwd ~/offices/perso/0007-x --body "Relance la gérance si rien n'est arrivé." --sphere perso`,
@@ -147,11 +149,30 @@ func registerEntries() {
 	})
 	spec.Register(&spec.Action{
 		Category: "due", Name: "show", Top: true,
-		Summary:  "Show an entry of the ledger: fields, notices to come, firings, history.",
-		Params:   []spec.Param{idParam(), sphereParam()},
-		Examples: []string{"due show E-0007 --sphere perso"},
+		Summary:    "Show an entry of the ledger: fields, notices to come, firings, history.",
+		Discussion: "The id's prefix names its sphere (PE-0007 perso, UE-0007 pro); --sphere is needed only for a bare number.",
+		Params:     []spec.Param{idParam(), readSphereParam()},
+		Examples:   []string{"due show PE-0007", "due show 7 --sphere perso"},
 		Run: func(ctx *spec.Context) (any, error) {
-			_, l, err := Open(ctx)
+			cfg, err := config.Load(ctx.Config)
+			if err != nil {
+				return nil, err
+			}
+			sphere, ok := cfg.SphereOfID(ctx.Str("id"))
+			if !ok {
+				spheres, err := ReadSpheres(ctx, cfg)
+				if err != nil {
+					return nil, err
+				}
+				if len(spheres) != 1 {
+					return nil, spec.UserError("%s names no sphere: give its full id (e.g. PE-0007) or --sphere", ctx.Str("id"))
+				}
+				sphere = spheres[0]
+			}
+			if err := checkSphere(ctx, cfg, sphere); err != nil {
+				return nil, err
+			}
+			l, err := OpenLedger(ctx, cfg, sphere)
 			if err != nil {
 				return nil, err
 			}
@@ -177,10 +198,10 @@ func registerEntries() {
 			{Name: "cwd", Kind: spec.String, Help: "New directory of the action."},
 			{Name: "ref", Kind: spec.String, Help: "New ref; empty clears it."},
 			{Name: "body", Kind: spec.String, Help: "New message or prompt; - reads stdin."},
-			sphereParam(),
+			writeSphereParam(),
 		},
 		Effects:  entryEffects,
-		Examples: []string{"due edit 7 --at 2026-11-20 --sphere perso", "due edit E-0007 --notice 14d,2d --do tell --sphere perso"},
+		Examples: []string{"due edit 7 --at 2026-11-20 --sphere perso", "due edit PE-0007 --notice 14d,2d --do tell --sphere perso"},
 		Run: func(ctx *spec.Context) (any, error) {
 			return change(ctx, "edit", func(l *ledger.Ledger, e *ledger.Entry) error {
 				var what []string
@@ -254,7 +275,7 @@ func registerEntries() {
 			idParam(),
 			{Name: "to", Kind: spec.String, Help: "New date, e.g. 2026-11-20 or 3d (from today)."},
 			{Name: "by", Kind: spec.String, Help: "Delay added to the current date, e.g. 7d."},
-			sphereParam(),
+			writeSphereParam(),
 		},
 		Effects:  entryEffects,
 		Examples: []string{"due snooze 7 --by 7d --sphere perso", "due snooze 7 --to 2026-11-20 --sphere perso"},
@@ -300,7 +321,7 @@ func registerEntries() {
 	} {
 		spec.Register(&spec.Action{
 			Category: "due", Name: s.name, Top: true, Summary: s.summary,
-			Params:   []spec.Param{idParam(), {Name: "note", Kind: spec.String, Help: "What happened, kept in the history."}, sphereParam()},
+			Params:   []spec.Param{idParam(), {Name: "note", Kind: spec.String, Help: "What happened, kept in the history."}, writeSphereParam()},
 			Effects:  entryEffects,
 			Examples: []string{fmt.Sprintf("due %s 7 --sphere perso", s.name)},
 			Run: func(ctx *spec.Context) (any, error) {
@@ -323,7 +344,7 @@ func registerEntries() {
 	spec.Register(&spec.Action{
 		Category: "due", Name: "rm", Top: true, Destructive: true,
 		Summary:  "Delete an entry's file. Prefer done or drop, which keep its history.",
-		Params:   []spec.Param{idParam(), sphereParam()},
+		Params:   []spec.Param{idParam(), writeSphereParam()},
 		Effects:  []string{"Deletes the entry's file and commits; the VCS keeps the old version."},
 		Examples: []string{"due rm 7 --sphere perso"},
 		Run: func(ctx *spec.Context) (any, error) {

@@ -32,43 +32,63 @@ func Now() time.Time {
 	return time.Now()
 }
 
-func sphereParam() spec.Param {
-	return spec.Param{Name: "sphere", Kind: spec.String, Help: "Sphere to act in, e.g. perso. Defaults to $DUE_SPHERE."}
+func readSphereParam() spec.Param {
+	return spec.Param{Name: "sphere", Kind: spec.String, Help: "Read only this sphere, e.g. pro. Defaults to $DUE_SPHERE, else every sphere."}
 }
 
-// SphereOf is the call's sphere, checked against the configuration and the MCP scope.
-func SphereOf(ctx *spec.Context, cfg *config.Config) (string, error) {
-	sphere := ctx.Str("sphere")
-	if sphere == "" {
-		sphere = os.Getenv("DUE_SPHERE")
-	}
-	if sphere == "" && ctx.Spheres != nil && len(ctx.Spheres) == 1 {
-		sphere = ctx.Spheres[0]
-	}
-	if sphere == "" {
-		names := cfg.Names()
-		ex := "perso"
-		if len(names) > 0 {
-			ex = names[0]
-		}
-		return "", spec.UserError("no sphere given: pass --sphere or set DUE_SPHERE (configured: %s). Example: --sphere %s", strings.Join(names, ", "), ex)
-	}
+func writeSphereParam() spec.Param {
+	return spec.Param{Name: "sphere", Kind: spec.String, Required: true,
+		Help:    "Sphere the entry belongs to, by what it is about: pro for work, perso otherwise. Never a default.",
+		Missing: "a write needs --sphere: the sphere follows what the entry is about, pro for work, perso otherwise; there is no default, not even $DUE_SPHERE"}
+}
+
+func checkSphere(ctx *spec.Context, cfg *config.Config, sphere string) error {
 	if ctx.Spheres != nil && !contains(ctx.Spheres, sphere) {
-		return "", spec.Forbidden("sphere %q is not served here; served: %s", sphere, strings.Join(ctx.Spheres, ", "))
+		return spec.Forbidden("sphere %q is not served here; served: %s", sphere, strings.Join(ctx.Spheres, ", "))
 	}
 	if _, ok := cfg.Spheres[sphere]; !ok {
-		return "", spec.UserError("unknown sphere %q; configured: %s. Example: due init --sphere perso --root ~/due/perso", sphere, strings.Join(cfg.Names(), ", "))
+		return spec.UserError("unknown sphere %q; configured: %s. Example: due init --sphere perso --root ~/due/perso", sphere, strings.Join(cfg.Names(), ", "))
 	}
-	return sphere, nil
+	return nil
 }
 
-// Open returns the configuration and the ledger of the call's sphere.
+// ReadSpheres are the spheres a read covers: the one given, else $DUE_SPHERE
+// on the command line, else every sphere configured or served.
+func ReadSpheres(ctx *spec.Context, cfg *config.Config) ([]string, error) {
+	sphere := ctx.Str("sphere")
+	if sphere == "" && ctx.Spheres == nil {
+		sphere = os.Getenv("DUE_SPHERE")
+	}
+	if sphere != "" {
+		return []string{sphere}, checkSphere(ctx, cfg, sphere)
+	}
+	if ctx.Spheres != nil {
+		return ctx.Spheres, nil
+	}
+	if len(cfg.Spheres) == 0 {
+		return nil, spec.UserError("no sphere is configured. Example: due init --sphere perso --root ~/due/perso")
+	}
+	return cfg.Names(), nil
+}
+
+// WriteSphere is the sphere a write goes to: always given, never a default,
+// since it follows what the entry is about.
+func WriteSphere(ctx *spec.Context, cfg *config.Config) (string, error) {
+	sphere := ctx.Str("sphere")
+	if sphere == "" {
+		return "", spec.UserError("a write needs --sphere (%s): the sphere follows what the entry is about, pro for work, perso otherwise; there is no default. Example: due add \"Renouveler le contrat\" --at 2027-03-31 --sphere pro",
+			strings.Join(cfg.Names(), ", "))
+	}
+	return sphere, checkSphere(ctx, cfg, sphere)
+}
+
+// Open returns the configuration and the ledger a write goes to.
 func Open(ctx *spec.Context) (*config.Config, *ledger.Ledger, error) {
 	cfg, err := config.Load(ctx.Config)
 	if err != nil {
 		return nil, nil, err
 	}
-	sphere, err := SphereOf(ctx, cfg)
+	sphere, err := WriteSphere(ctx, cfg)
 	if err != nil {
 		return nil, nil, err
 	}

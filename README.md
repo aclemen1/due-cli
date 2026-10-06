@@ -4,7 +4,7 @@ Every date that falls due, in one list, and actions fired at a date. One Go
 binary: CLI, MCP server (`due mcp`) and terminal interface (`due tui`).
 
 - **Ledger**: what no other tool carries (a contract's end, a warranty, a legal
-  delay), one Markdown file each (`~/due/<sphere>/E-0001.md`), versioned with jj.
+  delay), one Markdown file each (`~/due/<sphere>/PE-0001.md`), versioned with jj.
   due never writes into reminders or calendars. An entry has a date, notices before it (`7d,1d`) and an
   action at the term: `tell`, `agent` or `command`.
 - **Connectors**: dates read live from other tools, never copied: Apple
@@ -12,13 +12,16 @@ binary: CLI, MCP server (`due mcp`) and terminal interface (`due tui`).
   actions, and any command printing JSON.
 - **Launcher**: the launch agent `aero.clement.due` runs `due tick` every
   minute. Missed instants fire once, the latest only.
-- **Spheres** (perso, pro) never mix: each has its ledger, connectors and actions.
+- **Spheres** (perso, pro) file things, they do not hide them: reads cover every
+  sphere unless `--sphere` narrows them, and each line names its sphere. A write
+  needs `--sphere`, chosen by what the entry is about; there is no default. Ids
+  carry the sphere's prefix: `PE-0001` (perso), `UE-0001` (pro).
 
 ```bash
 due init --sphere perso --root ~/due/perso
 due add "Renouveler le passeport" --at 2026-12-01 --notice 30d,7d --sphere perso
-due ls --until 7d --sphere perso --format text
-due tui --sphere perso
+due ls --until 7d --format text
+due tui
 due launcher install
 due schema                     # every action, for agents
 ```
@@ -32,6 +35,7 @@ default_time: "09:00"            # hour of a date alone and of its notices
 spheres:
   perso:
     root: ~/due/perso
+    prefix: P                    # ids PE-0001
     horizon: 30d
     actions:                     # placeholders: {id} {title} {message} {prompt} {dossier} {ref} {at} {when} {cwd}
       tell: ["office", "tell", "{dossier}", "--office", "~/offices/perso", "--text", "{message}"]

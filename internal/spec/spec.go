@@ -27,6 +27,8 @@ type Param struct {
 	Default    string    `json:"default,omitempty"`
 	Enum       []string  `json:"enum,omitempty"`
 	Help       string    `json:"description"`
+	// Missing replaces the error of a required param left out.
+	Missing string `json:"-"`
 	// Hidden aliases absorbed on input, never shown in help or schema.
 	Aliases []string `json:"-"`
 }
@@ -256,6 +258,9 @@ func withDefaults(a *Action, out map[string]any) (map[string]any, error) {
 	for _, p := range a.Params {
 		if _, set := out[p.Name]; set {
 			continue
+		}
+		if p.Required && p.Missing != "" {
+			return nil, UserError("%s. Example: %s", p.Missing, firstExample(a))
 		}
 		if p.Required {
 			return nil, UserError("missing %s for `%s`. Example: %s", describeParam(p), a.Command(), firstExample(a))
