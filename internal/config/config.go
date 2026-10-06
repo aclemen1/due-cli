@@ -58,6 +58,7 @@ type Connector struct {
 	Exclude     []string `yaml:"exclude,omitempty"`      // routine: id globs dropped
 	Frequent    bool     `yaml:"frequent,omitempty"`     // routine: keep minutely and hourly routines
 	Run         []string `yaml:"run,omitempty"`          // command: argv with {from}, {until}, {sphere}
+	PastKinds   []string `yaml:"past_kinds,omitempty"`   // command: past lines kept only for these kinds
 }
 
 var sphereName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)

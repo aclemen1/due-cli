@@ -482,6 +482,7 @@ func command(ctx context.Context, c config.Connector, w Window) ([]Item, error) 
 		AllDay bool   `json:"all_day"`
 		Detail string `json:"detail"`
 		Ref    string `json:"ref"`
+		Kind   string `json:"kind"`
 	}
 	var lines []line
 	if err := json.Unmarshal(raw, &lines); err != nil {
@@ -500,7 +501,30 @@ func command(ctx context.Context, c config.Connector, w Window) ([]Item, error) 
 		if !ok {
 			continue
 		}
-		out = append(out, Item{ID: l.ID, Title: l.Title, At: t, AllDay: l.AllDay || isDate(l.At), Detail: l.Detail, Ref: l.Ref})
+		allDay := l.AllDay || isDate(l.At)
+		past := t.Before(w.Now)
+		if allDay {
+			past = endOfDay(t).Before(w.Now)
+		}
+		if past && len(c.PastKinds) > 0 && !containsFold(c.PastKinds, l.Kind) {
+			continue
+		}
+		detail := l.Detail
+		if l.Kind != "" && detail != "" {
+			detail = kindLabel(l.Kind) + " · " + detail
+		} else if l.Kind != "" {
+			detail = kindLabel(l.Kind)
+		}
+		out = append(out, Item{ID: l.ID, Title: l.Title, At: t, AllDay: allDay, Detail: detail, Ref: l.Ref})
 	}
 	return out, nil
+}
+
+// kindLabel names a kind of date in French, as the list shows it.
+func kindLabel(k string) string {
+	if l, ok := map[string]string{"contract": "contrat", "warranty": "garantie", "renewal": "renouvellement",
+		"legal": "délai légal", "payment": "paiement", "appointment": "rendez-vous", "other": "autre"}[k]; ok {
+		return l
+	}
+	return k
 }

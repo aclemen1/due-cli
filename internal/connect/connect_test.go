@@ -49,3 +49,26 @@ echo '{"ok":true,"result":[{"id":"g1","title":"Garantie lave-linge","at":"2026-1
 		t.Fatalf("got %+v", items)
 	}
 }
+
+func TestCommandPastKinds(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "dates.sh")
+	body := `#!/bin/sh
+echo '{"ok":true,"result":[
+ {"id":"a","title":"IRM","at":"2026-08-25T11:15:00+02:00","kind":"appointment"},
+ {"id":"b","title":"Facture ASEMA","at":"2026-08-06","kind":"payment"},
+ {"id":"c","title":"Fin du bail","at":"2026-10-31","kind":"contract"}]}'
+`
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.Local)
+	items, err := One(config.Connector{Name: "mnemo", Type: "command", Run: []string{script}, PastKinds: []string{"payment", "legal", "contract", "renewal"}},
+		Window{Until: now.AddDate(0, 0, 30), Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].ID != "b" || !items[0].Late || items[1].Detail != "contrat" {
+		t.Fatalf("got %+v", items)
+	}
+}
