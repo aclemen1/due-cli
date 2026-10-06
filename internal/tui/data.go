@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -140,7 +141,7 @@ func (m *model) act(name string, args map[string]any, status string) tea.Cmd {
 		case trigger.Fired:
 			out.status += " : " + r.Result
 		case *ledger.Entry:
-			out.select_ = r.ID
+			out.select_ = fmt.Sprint(args["sphere"]) + "\x00due\x00" + r.ID
 		}
 		return out
 	}
@@ -209,6 +210,11 @@ func (m *model) apply() {
 			sel = i
 		}
 	}
+	if sel < 0 && m.selKey != "" && m.busy() {
+		// The remembered line may be in a source still loading: wait for it.
+		m.sel = max(0, min(m.sel, len(out)-1))
+		return
+	}
 	if sel < 0 && m.selKey == "" {
 		sel = m.firstFuture()
 	}
@@ -240,6 +246,8 @@ type savedState struct {
 	Horizon  string `json:"horizon"`
 	ShowDone bool   `json:"show_done"`
 	DetailOn bool   `json:"detail_on"`
+	CritOnly bool   `json:"critical_only"`
+	Filter   string `json:"filter,omitempty"`
 	Selected string `json:"selected"`
 }
 
@@ -247,9 +255,16 @@ func (m *model) statePath() string {
 	return filepath.Join(config.StateDir(), "tui-"+strings.Join(m.spheres, "+")+".json")
 }
 
+// persist writes the state when it changed, so a restart, even after ctrl+c
+// or a closed pane, comes back to the same view, filters and line.
 func (m *model) persist() {
-	s := savedState{View: m.sourceName(), Horizon: horizons[m.horizon], ShowDone: m.showDone, DetailOn: m.detailOn, Selected: m.selKey}
+	s := savedState{View: m.sourceName(), Horizon: horizons[m.horizon], ShowDone: m.showDone, DetailOn: m.detailOn,
+		CritOnly: m.critOnly, Filter: m.filter, Selected: m.selKey}
 	b, _ := json.Marshal(s)
+	if bytes.Equal(b, m.saved) {
+		return
+	}
+	m.saved = b
 	_ = os.MkdirAll(config.StateDir(), 0o755)
 	_ = os.WriteFile(m.statePath(), b, 0o644)
 }
@@ -274,4 +289,6 @@ func (m *model) restore() {
 		}
 	}
 	m.showDone, m.detailOn, m.selKey = s.ShowDone, s.DetailOn, s.Selected
+	m.critOnly, m.filter = s.CritOnly, s.Filter
+	m.saved = b
 }

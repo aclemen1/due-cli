@@ -54,7 +54,7 @@ bare, as `{"items": [...]}` or as `{"ok": true, "result": [...]}`.
 
 ## TUI
 
-It opens on the ledger, at any date, grouped by period (late, this week, this
+It shows a table (values equal to the line above left blank) and opens on the ledger, at any date, by period (late, this week, this
 month…). Tabs: `s`/`S` or `1`–`9` move to everything (ledger and connectors
 within the horizon, by day) and to each connector; `esc` comes back. The detail
 follows the selection (right from 110 columns, below otherwise; `tab` hides it)

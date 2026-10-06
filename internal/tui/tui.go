@@ -115,6 +115,7 @@ type model struct {
 	status    string
 	statusErr bool
 	statusAt  time.Time
+	saved     []byte // the state last written
 	spin      int
 
 	// geometry of the last frame, for the mouse
@@ -208,11 +209,11 @@ func (m *model) current() (connect.Item, bool) {
 	return m.items[m.sel], true
 }
 
-func key(it connect.Item) string { return it.Source + "\x00" + it.ID }
+func key(it connect.Item) string { return it.Sphere + "\x00" + it.Source + "\x00" + it.ID }
 
 func (m *model) selectIndex(i int) {
 	if len(m.items) == 0 {
-		m.sel, m.selKey = 0, ""
+		m.sel = 0 // keep selKey: the line may come with the next read
 		return
 	}
 	i = max(0, min(i, len(m.items)-1))
@@ -222,7 +223,16 @@ func (m *model) selectIndex(i int) {
 	m.sel, m.selKey = i, key(m.items[i])
 }
 
+// Update handles a message, then keeps the state for the next start.
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	if m.ready {
+		m.persist()
+	}
+	return next, cmd
+}
+
+func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
@@ -285,7 +295,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setStatus(msg.status, false)
 		}
 		if msg.select_ != "" {
-			m.selKey = "due\x00" + msg.select_
+			m.selKey = msg.select_
 		}
 		return m, m.loadLedger()
 	case tea.MouseMsg:

@@ -268,8 +268,48 @@ func TestNowRuleBetweenPastAndFuture(t *testing.T) {
 	add(t, m, "Payer la facture", "01.10.2026", "")
 	add(t, m, "Résilier l'abonnement", "20.10.2026", "")
 	s := screen(m)
-	late, rule, next := strings.Index(s, "il y a 6 j"), strings.Index(s, "maintenant · mer. 07.10 10:00"), strings.Index(s, "dans 13 j   Résilier")
+	late, rule, next := strings.Index(s, "PE-0001  Payer la facture"), strings.Index(s, "maintenant · mer. 07.10 10:00"), strings.Index(s, "PE-0002  Résilier")
 	if late < 0 || rule < 0 || next < 0 || !(late < rule && rule < next) {
 		t.Fatalf("the now rule sits between past and future:\n%s", s)
+	}
+}
+
+func TestTableHidesRepeatedValues(t *testing.T) {
+	m := setup(t)
+	add(t, m, "Résilier Swisscom", "20.10.2026", "")
+	add(t, m, "Renvoyer le routeur", "20.10.2026", "")
+	s := screen(m)
+	var second string
+	for _, l := range strings.Split(s, "\n") {
+		if strings.Contains(l, "PE-0002  Renvoyer") {
+			second = l
+			break
+		}
+	}
+	if !strings.Contains(s, "Période") || !strings.Contains(s, "Ce mois-ci  mar. 20.10") || second == "" || strings.Contains(second, "20.10") || strings.Contains(second, "Ce mois-ci") {
+		t.Fatalf("a table, with the date and period shown once:\n%s", s)
+	}
+}
+
+func TestStateSurvivesARestart(t *testing.T) {
+	m := setup(t)
+	add(t, m, "Passeport", "01.12.2026", "")
+	add(t, m, "Garantie", "01.03.2027", "")
+	press(t, m, "k") // select the first entry
+	press(t, m, "tab")
+	press(t, m, "f")
+	press(t, m, "c")
+	press(t, m, "c")
+	_, _ = m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}) // ctrl+c, not q
+
+	again := newModel(m.cfgPath, m.cfg, m.spheres)
+	again.w, again.h = 130, 32
+	again.restore()
+	drive(t, again, again.loadLedger())
+	if again.detailOn || !again.showDone || again.critOnly {
+		t.Fatalf("restored: detail %v, done %v, critical %v", again.detailOn, again.showDone, again.critOnly)
+	}
+	if it, ok := again.current(); !ok || it.Title != "Passeport" {
+		t.Fatalf("the selected line comes back, got %+v", it)
 	}
 }

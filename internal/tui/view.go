@@ -19,7 +19,7 @@ import (
 var spinner = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 // sideFrom is the width from which the detail sits at the right of the list.
-const sideFrom = 110
+const sideFrom = 140
 
 func (m *model) View() tea.View {
 	v := tea.NewView(m.render())
@@ -62,7 +62,7 @@ func (m *model) panes(w, h, top int) []string {
 	detail := m.detailOn && hasSel
 	switch {
 	case detail && w >= sideFrom:
-		lw := w * 54 / 100
+		lw := w * 62 / 100
 		dw := w - lw - 3
 		left := m.list(lw, h, top)
 		right := m.detail(dw, h)
@@ -263,31 +263,6 @@ func (m *model) help(w int) []string {
 
 // ---------------------------------------------------------------- list
 
-type group struct {
-	title string
-	items []int
-}
-
-// groups: by period in the ledger (dates may be years away), by day elsewhere.
-func (m *model) groups() []group {
-	now := m.now()
-	var out []group
-	add := func(title string, i int) {
-		if len(out) == 0 || out[len(out)-1].title != title {
-			out = append(out, group{title: title})
-		}
-		out[len(out)-1].items = append(out[len(out)-1].items, i)
-	}
-	for i, it := range m.items {
-		if m.ledgerOnly() {
-			add(period(it, now), i)
-		} else {
-			add(when.Day(it.At)+" · "+when.Until(it.At, now), i)
-		}
-	}
-	return out
-}
-
 func period(it connect.Item, now time.Time) string {
 	if it.Type == "due" && it.State != ledger.Open {
 		return "Faites et abandonnées"
@@ -312,77 +287,6 @@ func period(it connect.Item, now time.Time) string {
 	}
 }
 
-func (m *model) list(w, h, top int) []string {
-	m.listY, m.listW, m.listH = top, w, h
-	m.rowItem = nil
-	if len(m.items) == 0 {
-		var msg []string
-		switch {
-		case !m.ready || (m.busy() && !m.ledgerOnly()):
-			msg = []string{"  " + sMuted.Render(spinner[m.spin%len(spinner)]+" lecture des sources…")}
-		case m.filter != "":
-			msg = []string{"", "  " + sMuted.Render("Rien ne correspond à « "+m.filter+" ». esc efface le filtre.")}
-		case m.ledgerOnly():
-			msg = []string{"", "  " + sText.Render("Le registre est vide."),
-				"  " + sMuted.Render("Il garde ce qu'aucun autre outil ne porte : fin de contrat, garantie, délai légal."),
-				"  " + sKey.Render("a") + sMuted.Render(" ajoute une échéance · ") + sKey.Render("s") + sMuted.Render(" montre les autres sources")}
-		default:
-			msg = []string{"", "  " + sMuted.Render("Rien d'échu dans cette fenêtre. H élargit l'horizon.")}
-		}
-		return msg
-	}
-	var rows []string
-	var owners []int
-	selRow := 0
-	future := m.firstFuture()
-	nowLine := func() {
-		rows, owners = append(rows, m.nowRule(w)), append(owners, -1)
-	}
-	for gi, g := range m.groups() {
-		if gi > 0 {
-			rows, owners = append(rows, ""), append(owners, -1)
-		}
-		if g.items[0] == future {
-			nowLine()
-			rows, owners = append(rows, ""), append(owners, -1)
-		}
-		title := sSection.Render(g.title)
-		if m.ledgerOnly() {
-			title += sMuted.Render(fmt.Sprintf("  %d", len(g.items)))
-		}
-		rows, owners = append(rows, " "+title), append(owners, -1)
-		for k, i := range g.items {
-			if i == future && k > 0 {
-				nowLine()
-			}
-			line := m.row(m.items[i], w)
-			if i == m.sel {
-				selRow = len(rows)
-				line = selectLine(line, w)
-			}
-			rows, owners = append(rows, line), append(owners, i)
-		}
-	}
-	if future < 0 && len(m.items) > 0 && m.isPast(m.items[len(m.items)-1]) {
-		nowLine()
-	}
-	// Keep the selection visible, with its group title when it fits.
-	if selRow-2 < m.top {
-		m.top = max(0, selRow-2)
-	}
-	if selRow >= m.top+h {
-		m.top = selRow - h + 1
-	}
-	m.top = max(0, min(m.top, len(rows)-h))
-	end := min(len(rows), m.top+h)
-	m.rowItem = owners[m.top:end]
-	out := rows[m.top:end]
-	if len(rows) > h {
-		out = withScrollbar(out, w, m.top, len(rows), h)
-	}
-	return out
-}
-
 func withScrollbar(lines []string, w, top, total, h int) []string {
 	thumb := max(1, h*h/total)
 	pos := (h - thumb) * top / max(1, total-h)
@@ -394,60 +298,6 @@ func withScrollbar(lines []string, w, top, total, h int) []string {
 		lines[i] = pad(lines[i], w-1) + ch
 	}
 	return lines
-}
-
-func (m *model) row(it connect.Item, w int) string {
-	now := m.now()
-	done := it.Type == "due" && it.State != ledger.Open
-	urg := urgency(it.At, now, it.Late)
-	if done {
-		urg = sMuted
-	}
-	dot := urg.Render("●")
-	if it.Late && !done {
-		dot = sErr.Render("!")
-	}
-	if !done && judge.IsCritical(it, m.cfg.Judge.Threshold) {
-		dot = sErr.Render("⚠")
-	}
-	var date string
-	if m.ledgerOnly() {
-		date = shortDay(it.At, now)
-		if !it.AllDay {
-			date += " " + it.At.Format("15:04")
-		}
-		date = fmt.Sprintf("%-17s", date)
-	} else if it.AllDay {
-		date = "     "
-	} else {
-		date = it.At.Format("15:04")
-	}
-	rel := fmt.Sprintf("%-11s", relShort(it.At, now))
-	title := sText.Render(it.Title)
-	if done {
-		title = sMuted.Strikethrough(true).Render(it.Title)
-	}
-	var tail string
-	if it.Type == "due" {
-		tail = m.entryTail(it)
-	} else {
-		tail = it.Detail
-	}
-	src := ""
-	if !m.ledgerOnly() {
-		src = sourceStyle(it).Render(fmt.Sprintf("%-9s", trunc(it.Source, 9))) + " "
-	}
-	line := fmt.Sprintf(" %s %s %s %s%s", dot, m.sphereMark(it.Sphere), sMuted.Render(date), src, title)
-	if m.ledgerOnly() {
-		line = fmt.Sprintf(" %s %s%s %s %s", dot, m.sphereMark(it.Sphere), sText.Render(date), urg.Render(rel), title)
-	}
-	if tail != "" {
-		room := w - ansi.StringWidth(line) - 3
-		if room > 6 {
-			line += "  " + sMuted.Render(trunc(tail, room))
-		}
-	}
-	return line
 }
 
 // entryTail sums up an entry: its action and its next notice.
