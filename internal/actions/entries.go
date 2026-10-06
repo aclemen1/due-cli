@@ -159,7 +159,7 @@ func registerEntries() {
 			if err != nil {
 				return nil, err
 			}
-			return detail(l, e), nil
+			return DetailOf(l, e), nil
 		},
 		Text: textDetail,
 	})
@@ -361,7 +361,8 @@ type Upcoming struct {
 	When time.Time `json:"when"`
 }
 
-func detail(l *ledger.Ledger, e *ledger.Entry) Detail {
+// DetailOf is an entry with its instants to come.
+func DetailOf(l *ledger.Ledger, e *ledger.Entry) Detail {
 	d := Detail{Entry: e, Sphere: l.Sphere, Term: e.Moment().Time(l.Loc(), l.Clock), Upcoming: []Upcoming{}}
 	if e.State == ledger.Open {
 		now := l.Now()

@@ -1,30 +1,31 @@
-// Package tui is due's terminal interface: the unified list of a sphere,
-// the detail of a line, and the changes of the ledger.
+// Package tui is due's terminal interface: the ledger first, then every
+// source; a detail panel that follows the selection; a form to add and edit;
+// live updates from the files of the sources.
 package tui
 
 import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/aclemen1/due-cli/internal/actions"
 	"github.com/aclemen1/due-cli/internal/config"
 	"github.com/aclemen1/due-cli/internal/connect"
 	"github.com/aclemen1/due-cli/internal/spec"
-	"github.com/aclemen1/due-cli/internal/trigger"
+	"github.com/aclemen1/due-cli/internal/watch"
 	"github.com/aclemen1/due-cli/internal/when"
 )
 
 func init() {
 	spec.Register(&spec.Action{
 		Category: "setup", Name: "tui", Top: true,
-		Summary:  "Open the terminal interface on a sphere: the unified list, the detail of a line, the changes of the ledger.",
+		Summary:  "Open the terminal interface on a sphere: the ledger, every source, the detail of a line, a form to add and edit.",
 		Params:   []spec.Param{{Name: "sphere", Kind: spec.String, Help: "Sphere to show. Defaults to $DUE_SPHERE."}},
 		Effects:  []string{"Runs until q; every change goes through the same actions as the CLI."},
 		Examples: []string{"due tui --sphere perso"},
@@ -37,27 +38,23 @@ func init() {
 			if err != nil {
 				return nil, err
 			}
-			_, err = tea.NewProgram(newModel(ctx.Config, cfg, sphere)).Run()
+			m := newModel(ctx.Config, cfg, sphere)
+			if w, err := watch.Start(watch.Roots(cfg.Spheres[sphere], sphere), 300*time.Millisecond); err == nil {
+				m.watcher = w
+				defer w.Close()
+			}
+			m.restore()
+			_, err = tea.NewProgram(m).Run()
 			return spec.Streamed{}, err
 		},
 	})
 }
-
-type view int
-
-const (
-	vList view = iota
-	vDetail
-)
 
 type prompt int
 
 const (
 	pNone prompt = iota
 	pFilter
-	pAddTitle
-	pAddAt
-	pAddNotice
 	pSnooze
 	pConfirmDrop
 	pConfirmRun
@@ -66,42 +63,66 @@ const (
 
 var horizons = []string{"7d", "30d", "90d", "365d"}
 
+const (
+	pollEvery  = 60 * time.Second
+	fullEvery  = 10 * time.Minute
+	statusLife = 5 * time.Second
+)
+
 type model struct {
 	cfgPath string
 	cfg     *config.Config
 	sphere  string
 	now     func() time.Time
+	watcher *watch.Watcher
 
-	view    view
-	listing *actions.Listing
-	loading bool
-	items   []connect.Item // after the source and text filters
-	sel     int
-	top     int
-
-	horizon  int
+	// what is shown
 	source   int // index in views(): 0 the ledger, 1 everything, then each connector
+	horizon  int
 	filter   string
 	showDone bool
+	detailOn bool
+	helpOn   bool
 
-	detail     *actions.Detail
-	detailItem connect.Item
-	scroll     int
+	// data
+	ledger   []connect.Item
+	details  map[string]*actions.Detail
+	conn     map[string][]connect.Item
+	connErr  map[string]string
+	loading  map[string]bool
+	loadedAt time.Time
+	lastFull time.Time
+	ready    bool
+
+	// list
+	items   []connect.Item
+	sel     int
+	selKey  string
+	top     int
+	scroll  int
+	rowItem []int // for each list row on screen: the item index, or -1
 
 	prompt prompt
 	input  textinput.Model
-	draft  map[string]any
+	form   *form
 
 	w, h      int
 	status    string
 	statusErr bool
-	helpOn    bool
+	statusAt  time.Time
+	spin      int
+
+	// geometry of the last frame, for the mouse
+	listY, listH, listW, tabsY int
+	tabX                       []int
 }
 
 func newModel(cfgPath string, cfg *config.Config, sphere string) *model {
 	in := textinput.New()
 	in.Prompt = ""
-	m := &model{cfgPath: cfgPath, cfg: cfg, sphere: sphere, now: actions.Now, input: in, w: 100, h: 30, horizon: 1}
+	m := &model{cfgPath: cfgPath, cfg: cfg, sphere: sphere, now: actions.Now, input: in, w: 100, h: 30, horizon: 1,
+		detailOn: true, details: map[string]*actions.Detail{}, conn: map[string][]connect.Item{},
+		connErr: map[string]string{}, loading: map[string]bool{}}
 	for i, x := range horizons {
 		if x == cfg.Spheres[sphere].Horizon {
 			m.horizon = i
@@ -110,24 +131,23 @@ func newModel(cfgPath string, cfg *config.Config, sphere string) *model {
 	return m
 }
 
-type loadedMsg struct {
-	listing *actions.Listing
-	err     error
-}
-
-type doneMsg struct {
-	status string
-	err    error
-}
-
-type detailMsg struct {
-	d   *actions.Detail
-	err error
+func (m *model) connectors() []config.Connector {
+	var out []config.Connector
+	for _, c := range m.cfg.Spheres[m.sphere].Connectors {
+		if !c.Off {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // views are the sources shown in turn by s: the ledger alone, everything, then each connector.
 func (m *model) views() []string {
-	return append([]string{"registre", "toutes"}, actions.SourceNames(m.cfg.Spheres[m.sphere])[1:]...)
+	out := []string{"registre", "toutes"}
+	for _, c := range m.connectors() {
+		out = append(out, c.Name)
+	}
+	return out
 }
 
 func (m *model) sourceName() string { return m.views()[m.source] }
@@ -140,158 +160,123 @@ func (m *model) ctx(args map[string]any) *spec.Context {
 	return &spec.Context{Args: args, Config: m.cfgPath, Format: "json"}
 }
 
-func (m *model) load() tea.Cmd {
-	m.loading = true
-	q := actions.Query{Until: horizons[m.horizon]}
-	if m.ledgerOnly() {
-		q = actions.Query{Until: "36500d", Sources: []string{"due"}, All: m.showDone}
+func (m *model) Init() tea.Cmd {
+	cmds := []tea.Cmd{tea.RequestBackgroundColor, m.loadLedger(), m.loadAll(), tick(), poll()}
+	if m.watcher != nil {
+		cmds = append(cmds, waitWatch(m.watcher))
 	}
-	ctx := m.ctx(map[string]any{})
-	return func() tea.Msg {
-		cfg, l, err := actions.Open(ctx)
-		if err != nil {
-			return loadedMsg{err: err}
-		}
-		res, err := actions.List(cfg, l, q)
-		return loadedMsg{listing: res, err: err}
-	}
+	return tea.Batch(cmds...)
 }
 
-// act runs an action of the ledger, as `due <name>` would.
-func (m *model) act(name string, args map[string]any, status string) tea.Cmd {
-	args["sphere"] = m.sphere
-	return func() tea.Msg {
-		a := spec.Find("due", name)
-		parsed, err := spec.ArgsFrom(a, args)
-		if err != nil {
-			return doneMsg{err: err}
-		}
-		res, err := a.Run(&spec.Context{Args: parsed, Config: m.cfgPath, Format: "json"})
-		if err != nil {
-			return doneMsg{err: err}
-		}
-		if f, ok := res.(trigger.Fired); ok {
-			status += " : " + f.Result
-		}
-		return doneMsg{status: status}
-	}
-}
-
-func (m *model) loadDetail(id string) tea.Cmd {
-	ctx := m.ctx(map[string]any{"id": id})
-	return func() tea.Msg {
-		res, err := spec.Find("due", "show").Run(ctx)
-		if err != nil {
-			return detailMsg{err: err}
-		}
-		d := res.(actions.Detail)
-		return detailMsg{d: &d}
-	}
-}
-
-func (m *model) Init() tea.Cmd { return tea.Batch(tea.RequestBackgroundColor, m.load()) }
-
-func (m *model) setStatus(s string, isErr bool) { m.status, m.statusErr = s, isErr }
-
-// apply filters the listing by source and text.
-func (m *model) apply() {
-	m.items = nil
-	if m.listing == nil {
-		return
-	}
-	src := ""
-	switch {
-	case m.ledgerOnly():
-		src = "due"
-	case m.source > 1:
-		src = m.sourceName()
-	}
-	needle := strings.ToLower(m.filter)
-	for _, it := range m.listing.Items {
-		if src != "" && it.Source != src {
-			continue
-		}
-		if needle != "" && !strings.Contains(strings.ToLower(it.Title+" "+it.Detail+" "+it.ID+" "+it.Source), needle) {
-			continue
-		}
-		m.items = append(m.items, it)
-	}
-	m.sel = max(0, min(m.sel, len(m.items)-1))
+func (m *model) setStatus(s string, isErr bool) {
+	m.status, m.statusErr, m.statusAt = s, isErr, m.now()
 }
 
 func (m *model) current() (connect.Item, bool) {
-	if m.view == vDetail {
-		return m.detailItem, true
-	}
 	if m.sel < 0 || m.sel >= len(m.items) {
 		return connect.Item{}, false
 	}
 	return m.items[m.sel], true
 }
 
+func key(it connect.Item) string { return it.Source + "\x00" + it.ID }
+
+func (m *model) selectIndex(i int) {
+	if len(m.items) == 0 {
+		m.sel, m.selKey = 0, ""
+		return
+	}
+	i = max(0, min(i, len(m.items)-1))
+	if i != m.sel {
+		m.scroll = 0
+	}
+	m.sel, m.selKey = i, key(m.items[i])
+}
+
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
-		m.input.SetWidth(max(10, m.w-40))
+		m.input.SetWidth(max(10, m.w-30))
+		if m.form != nil {
+			m.form.resize(m.w)
+		}
 	case tea.BackgroundColorMsg:
 		darkBackground = msg.IsDark()
-	case loadedMsg:
-		m.loading = false
+	case tickMsg:
+		m.spin++
+		if m.status != "" && !m.statusErr && m.now().Sub(m.statusAt) > statusLife {
+			m.status = ""
+		}
+		return m, tick()
+	case pollMsg:
+		var cmds []tea.Cmd
+		if m.now().Sub(m.lastFull) > fullEvery {
+			cmds = append(cmds, m.loadLedger(), m.loadAll())
+		} else {
+			for _, name := range watch.Polled(m.cfg.Spheres[m.sphere]) {
+				cmds = append(cmds, m.loadConn(name))
+			}
+		}
+		return m, tea.Batch(append(cmds, poll())...)
+	case watchMsg:
+		var cmd tea.Cmd
+		if msg.source == "due" {
+			cmd = m.loadLedger()
+		} else {
+			cmd = m.loadConn(msg.source)
+		}
+		return m, tea.Batch(cmd, waitWatch(m.watcher))
+	case ledgerMsg:
+		m.loading["due"] = false
 		if msg.err != nil {
 			m.setStatus(msg.err.Error(), true)
 			return m, nil
 		}
-		m.listing = msg.listing
+		m.ledger, m.details, m.loadedAt, m.ready = msg.items, msg.details, m.now(), true
 		m.apply()
-		if m.view == vDetail {
-			for _, it := range m.listing.Items {
-				if it.Source == m.detailItem.Source && it.ID == m.detailItem.ID {
-					m.detailItem = it
-				}
-			}
-		}
-		if len(msg.listing.Errors) > 0 && !m.statusErr {
-			var names []string
-			for _, e := range msg.listing.Errors {
-				names = append(names, e.Source)
-			}
-			m.setStatus("sources en erreur : "+strings.Join(names, ", ")+" (? pour le détail)", true)
-		}
-	case detailMsg:
+	case connMsg:
+		m.loading[msg.name] = false
 		if msg.err != nil {
-			m.setStatus(msg.err.Error(), true)
-			return m, nil
+			m.connErr[msg.name] = msg.err.Error()
+		} else {
+			delete(m.connErr, msg.name)
+			m.conn[msg.name] = msg.items
 		}
-		m.detail = msg.d
+		m.loadedAt = m.now()
+		m.apply()
 	case doneMsg:
 		if msg.err != nil {
 			m.setStatus(msg.err.Error(), true)
 			return m, nil
 		}
-		m.setStatus(msg.status, false)
-		cmds := []tea.Cmd{m.load()}
-		if m.view == vDetail && m.detailItem.Type == "due" {
-			cmds = append(cmds, m.loadDetail(m.detailItem.ID))
+		if msg.status != "" {
+			m.setStatus(msg.status, false)
 		}
-		return m, tea.Batch(cmds...)
+		if msg.select_ != "" {
+			m.selKey = "due\x00" + msg.select_
+		}
+		return m, m.loadLedger()
+	case tea.MouseMsg:
+		if m.form == nil && m.prompt == pNone {
+			return m, m.mouse(msg)
+		}
 	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
 		}
+		if m.form != nil {
+			return m, m.keyForm(msg)
+		}
 		if m.prompt != pNone {
 			return m, m.keyPrompt(msg)
 		}
-		m.status, m.statusErr = "", false
-		switch msg.String() {
-		case "q":
-			return m, tea.Quit
-		case "?":
-			m.helpOn = !m.helpOn
-			return m, nil
+		if m.statusErr {
+			m.status, m.statusErr = "", false
 		}
-		if m.view == vDetail {
-			return m, m.keyDetail(msg)
+		if msg.String() == "q" {
+			m.persist()
+			return m, tea.Quit
 		}
 		return m, m.keyList(msg)
 	}
@@ -306,84 +291,96 @@ func (m *model) ask(p prompt, placeholder, value string) tea.Cmd {
 	return m.input.Focus()
 }
 
+func (m *model) setView(i int) tea.Cmd {
+	m.source = (i + len(m.views())) % len(m.views())
+	m.top, m.scroll = 0, 0
+	m.apply()
+	m.persist()
+	return nil
+}
+
 func (m *model) keyList(k tea.KeyPressMsg) tea.Cmd {
-	switch k.String() {
+	page := max(1, m.listH-2)
+	switch s := k.String(); s {
 	case "up", "k":
-		m.sel = max(0, m.sel-1)
+		m.selectIndex(m.sel - 1)
 	case "down", "j":
-		m.sel = max(0, min(len(m.items)-1, m.sel+1))
-	case "pgup":
-		m.sel = max(0, m.sel-m.bodyHeight())
-	case "pgdown":
-		m.sel = max(0, min(len(m.items)-1, m.sel+m.bodyHeight()))
+		m.selectIndex(m.sel + 1)
+	case "pgup", "ctrl+b":
+		m.selectIndex(m.sel - page)
+	case "pgdown", "ctrl+f", "space":
+		m.selectIndex(m.sel + page)
 	case "home", "g":
-		m.sel = 0
+		m.selectIndex(0)
 	case "end", "G":
-		m.sel = max(0, len(m.items)-1)
+		m.selectIndex(len(m.items) - 1)
+	case "J", "ctrl+d":
+		m.scroll += 3
+	case "K", "ctrl+u":
+		m.scroll = max(0, m.scroll-3)
 	case "esc":
 		switch {
+		case m.helpOn:
+			m.helpOn = false
 		case m.filter != "":
 			m.filter = ""
+			m.apply()
 		case !m.ledgerOnly():
-			m.source, m.sel = 0, 0
-			return m.load()
+			return m.setView(0)
 		}
-		m.apply()
+	case "?":
+		m.helpOn = !m.helpOn
+	case "tab":
+		m.detailOn = !m.detailOn
+		m.persist()
 	case "/":
-		return m.ask(pFilter, "texte à chercher", m.filter)
-	case "h":
-		if m.ledgerOnly() {
-			m.setStatus("le registre montre toutes les dates ; s pour la vue avec horizon", false)
-			return nil
-		}
+		return m.ask(pFilter, "titre, détail, source…", m.filter)
+	case "s", "right", "l":
+		return m.setView(m.source + 1)
+	case "S", "left", "h":
+		return m.setView(m.source - 1)
+	case "H":
 		m.horizon = (m.horizon + 1) % len(horizons)
-		return m.load()
+		m.persist()
+		if m.ledgerOnly() {
+			m.setStatus("horizon "+horizons[m.horizon]+" (vue toutes et connecteurs)", false)
+		}
+		return m.loadAll()
 	case "f":
-		if !m.ledgerOnly() {
-			return nil
-		}
 		m.showDone = !m.showDone
-		return m.load()
-	case "s":
-		was := m.ledgerOnly()
-		m.source = (m.source + 1) % len(m.views())
-		m.sel = 0
-		if was != m.ledgerOnly() {
-			return m.load()
-		}
-		m.apply()
+		m.persist()
+		return m.loadLedger()
 	case "r":
-		return m.load()
+		m.setStatus("relecture de toutes les sources", false)
+		return tea.Batch(m.loadLedger(), m.loadAll())
 	case "a":
-		m.draft = map[string]any{}
-		return m.ask(pAddTitle, "titre de l'échéance", "")
-	case "enter", "right", "l":
-		it, ok := m.current()
-		if !ok {
-			return nil
-		}
-		m.view, m.scroll, m.detail, m.detailItem = vDetail, 0, nil, it
-		if it.Type == "due" {
-			return m.loadDetail(it.ID)
+		m.form = newForm(m, nil)
+		return m.form.focus()
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		n, _ := strconv.Atoi(s)
+		if n <= len(m.views()) {
+			return m.setView(n - 1)
 		}
 	default:
-		return m.keyEntry(k)
+		return m.keyEntry(s)
 	}
 	return nil
 }
 
-// keyEntry handles the changes of a ledger entry, from the list or the detail.
-func (m *model) keyEntry(k tea.KeyPressMsg) tea.Cmd {
-	key := k.String()
-	if !strings.Contains("dxzeRD", key) || len(key) != 1 {
-		return nil
-	}
+// keyEntry handles the actions on the selected line.
+func (m *model) keyEntry(key string) tea.Cmd {
 	it, ok := m.current()
 	if !ok {
 		return nil
 	}
+	if key == "o" || key == "enter" {
+		return m.open(it)
+	}
+	if !strings.Contains("dxzeERD", key) || len(key) != 1 {
+		return nil
+	}
 	if it.Type != "due" {
-		m.setStatus("ligne de "+it.Source+" : elle se modifie dans "+it.Type, true)
+		m.setStatus("cette ligne vient de "+it.Source+" : elle se modifie dans "+it.Type+" (o pour l'ouvrir)", true)
 		return nil
 	}
 	switch key {
@@ -393,16 +390,50 @@ func (m *model) keyEntry(k tea.KeyPressMsg) tea.Cmd {
 		}
 		return m.act("done", map[string]any{"id": it.ID}, it.ID+" faite")
 	case "x":
-		return m.ask(pConfirmDrop, "o pour abandonner "+it.ID, "")
+		return m.ask(pConfirmDrop, "o pour abandonner « "+it.Title+" »", "")
 	case "D":
-		return m.ask(pConfirmRm, "o pour supprimer le fichier de "+it.ID, "")
+		return m.ask(pConfirmRm, "o pour supprimer définitivement « "+it.Title+" »", "")
 	case "R":
-		return m.ask(pConfirmRun, "o pour exécuter maintenant l'action de "+it.ID, "")
+		return m.ask(pConfirmRun, "o pour exécuter maintenant l'action de « "+it.Title+" »", "")
 	case "z":
-		return m.ask(pSnooze, "report : 1d, 7d, ou une date", "1d")
+		return m.ask(pSnooze, "1d, 7d, 2w, ou une date", "7d")
 	case "e":
+		if d := m.details[it.ID]; d != nil {
+			m.form = newForm(m, d)
+			return m.form.focus()
+		}
+	case "E":
 		return m.editFile(it.ID)
 	}
+	return nil
+}
+
+// open shows a line in its own tool: the dossier's session for office.
+func (m *model) open(it connect.Item) tea.Cmd {
+	switch it.Type {
+	case "due":
+		m.detailOn = true
+		return nil
+	case "office":
+		for _, c := range m.connectors() {
+			if c.Name == it.Source {
+				dir := c.Office
+				return func() tea.Msg {
+					args := []string{"goto", it.ID}
+					if dir != "" {
+						args = append(args, "--office", dir)
+					}
+					out, err := exec.Command("office", args...).CombinedOutput()
+					if err != nil {
+						return doneMsg{err: errorf("office goto %s : %s", it.ID, strings.TrimSpace(string(out)))}
+					}
+					return doneMsg{status: "dossier " + it.ID + " ouvert"}
+				}
+			}
+		}
+	}
+	m.detailOn = true
+	m.setStatus("rien à ouvrir pour une ligne de "+it.Type+" : voir le détail", false)
 	return nil
 }
 
@@ -427,20 +458,6 @@ func (m *model) editFile(id string) tea.Cmd {
 	})
 }
 
-func (m *model) keyDetail(k tea.KeyPressMsg) tea.Cmd {
-	switch k.String() {
-	case "esc", "left":
-		m.view = vList
-	case "up", "k":
-		m.scroll = max(0, m.scroll-1)
-	case "down", "j":
-		m.scroll++
-	default:
-		return m.keyEntry(k)
-	}
-	return nil
-}
-
 func (m *model) keyPrompt(k tea.KeyPressMsg) tea.Cmd {
 	switch k.String() {
 	case "esc":
@@ -462,8 +479,8 @@ func (m *model) keyPrompt(k tea.KeyPressMsg) tea.Cmd {
 	m.input, cmd = m.input.Update(k)
 	if m.prompt == pFilter {
 		m.filter = m.input.Value()
-		m.sel = 0
 		m.apply()
+		m.selectIndex(0)
 	}
 	return cmd
 }
@@ -475,27 +492,6 @@ func (m *model) submit(p prompt, v string) tea.Cmd {
 	case pFilter:
 		m.filter = v
 		m.apply()
-	case pAddTitle:
-		if v == "" {
-			return nil
-		}
-		m.draft["title"] = v
-		return m.ask(pAddAt, "date : 2026-11-15, 15.11.2026 14:00, demain, 3d", "")
-	case pAddAt:
-		if v == "" {
-			return nil
-		}
-		if _, err := when.ParseMoment(v, m.now()); err != nil {
-			m.setStatus(err.Error(), true)
-			return m.ask(pAddAt, "date : 2026-11-15, 15.11.2026 14:00, demain, 3d", v)
-		}
-		m.draft["at"] = v
-		return m.ask(pAddNotice, "préavis, facultatif : 7d,1d", "")
-	case pAddNotice:
-		if v != "" {
-			m.draft["notice"] = []string{v}
-		}
-		return m.act("add", m.draft, "échéance ajoutée")
 	case pSnooze:
 		if v == "" {
 			return nil
@@ -513,7 +509,6 @@ func (m *model) submit(p prompt, v string) tea.Cmd {
 		}
 	case pConfirmRm:
 		if yes {
-			m.view = vList
 			return m.act("rm", map[string]any{"id": it.ID}, it.ID+" supprimée")
 		}
 	case pConfirmRun:
@@ -524,26 +519,40 @@ func (m *model) submit(p prompt, v string) tea.Cmd {
 	return nil
 }
 
-func (m *model) bodyHeight() int {
-	h := m.h - 3
-	if m.helpOn {
-		h -= len(m.helpLines()) + 1
+// mouse: a click selects a row or a view tab, the wheel moves the list or
+// scrolls the detail.
+func (m *model) mouse(ev tea.MouseMsg) tea.Cmd {
+	mm := ev.Mouse()
+	switch ev.(type) {
+	case tea.MouseWheelMsg:
+		step := 1
+		if mm.Button == tea.MouseWheelUp {
+			step = -1
+		}
+		if mm.X < m.listW && mm.Y >= m.listY && mm.Y < m.listY+m.listH {
+			m.selectIndex(m.sel + step)
+		} else {
+			m.scroll = max(0, m.scroll+step*2)
+		}
+	case tea.MouseClickMsg:
+		if mm.Button != tea.MouseLeft {
+			return nil
+		}
+		if mm.Y == m.tabsY {
+			for i := len(m.tabX) - 1; i >= 0; i-- {
+				if mm.X >= m.tabX[i] {
+					return m.setView(i)
+				}
+			}
+			return nil
+		}
+		row := mm.Y - m.listY
+		if mm.X < m.listW && row >= 0 && row < len(m.rowItem) && m.rowItem[row] >= 0 {
+			if m.rowItem[row] == m.sel {
+				m.detailOn = true
+			}
+			m.selectIndex(m.rowItem[row])
+		}
 	}
-	return max(3, h)
-}
-
-func sourceStyle(it connect.Item) lipgloss.Style {
-	switch it.Type {
-	case "due":
-		return lipgloss.NewStyle().Foreground(cAccent).Bold(true)
-	case "reminders":
-		return lipgloss.NewStyle().Foreground(cPerso)
-	case "calendar":
-		return lipgloss.NewStyle().Foreground(cOther)
-	case "office":
-		return lipgloss.NewStyle().Foreground(cPro)
-	case "routine", "oj":
-		return lipgloss.NewStyle().Foreground(cWorking)
-	}
-	return sMuted
+	return nil
 }

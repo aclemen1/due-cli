@@ -50,12 +50,20 @@ bare, as `{"items": [...]}` or as `{"ok": true, "result": [...]}`.
 
 ## TUI
 
-It opens on the ledger, at any date. `s` cycles to everything (ledger and
-connectors within the horizon), then to each connector; `esc` comes back.
+It opens on the ledger, at any date, grouped by period (late, this week, this
+month…). Tabs: `s`/`S` or `1`–`9` move to everything (ledger and connectors
+within the horizon, by day) and to each connector; `esc` comes back. The detail
+follows the selection (right from 110 columns, below otherwise; `tab` hides it)
+and shows each entry's timeline of notices and term. `a` and `e` open a form
+that reads the date and notices as you type.
 
-`↵` detail · `a` add · `d` done/reopen · `z` snooze · `e` edit the file ·
-`x` drop · `R` run now · `f` done entries too · `/` search · `s` source ·
-`h` horizon · `?` help · `esc` back · `q` quit.
+It updates itself: the files of the ledger, office, routine and oj are watched;
+reminders and calendars are read again every minute.
+
+`a` add · `e` edit (form) · `E` edit the file · `d` done/reopen · `z` snooze ·
+`R` run now · `x` drop · `D` delete · `o` open (office dossier) · `f` done too ·
+`H` horizon · `/` search · `r` read again · `?` help · `esc` back · `q` quit.
+Mouse: click to select, wheel to scroll.
 
 ## License
 

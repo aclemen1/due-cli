@@ -15,7 +15,8 @@ import (
 	"github.com/aclemen1/due-cli/internal/ledger"
 )
 
-// drive feeds the messages of due's commands back into the model.
+// drive feeds the messages of due's commands back into the model; timers and
+// cursor blinks are left out.
 func drive(t *testing.T, m *model, cmd tea.Cmd) {
 	t.Helper()
 	if cmd == nil {
@@ -26,7 +27,7 @@ func drive(t *testing.T, m *model, cmd tea.Cmd) {
 	var got tea.Msg
 	select {
 	case got = <-ch:
-	case <-time.After(200 * time.Millisecond): // a cursor blink, not ours
+	case <-time.After(120 * time.Millisecond):
 		return
 	}
 	switch msg := got.(type) {
@@ -34,25 +35,30 @@ func drive(t *testing.T, m *model, cmd tea.Cmd) {
 		for _, c := range msg {
 			drive(t, m, c)
 		}
-	case loadedMsg, doneMsg, detailMsg:
+	case ledgerMsg, connMsg, doneMsg:
 		_, next := m.Update(msg)
 		drive(t, m, next)
 	}
 }
 
-func press(t *testing.T, m *model, s string) tea.Cmd {
-	t.Helper()
-	var k tea.KeyPressMsg
+func keyOf(s string) tea.KeyPressMsg {
 	switch s {
 	case "enter":
-		k = tea.KeyPressMsg{Code: tea.KeyEnter}
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
 	case "esc":
-		k = tea.KeyPressMsg{Code: tea.KeyEscape}
-	default:
-		k = tea.KeyPressMsg{Code: []rune(s)[0], Text: s}
+		return tea.KeyPressMsg{Code: tea.KeyEscape}
+	case "tab":
+		return tea.KeyPressMsg{Code: tea.KeyTab}
+	case "ctrl+s":
+		return tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}
 	}
-	_, cmd := m.Update(k)
-	if s == "q" {
+	return tea.KeyPressMsg{Code: []rune(s)[0], Text: s}
+}
+
+func press(t *testing.T, m *model, s string) tea.Cmd {
+	t.Helper()
+	_, cmd := m.Update(keyOf(s))
+	if s == "q" && m.form == nil && m.prompt == pNone {
 		return cmd
 	}
 	drive(t, m, cmd)
@@ -77,7 +83,7 @@ func setup(t *testing.T) *model {
 	if err := os.WriteFile(cfgPath, []byte("spheres:\n  perso:\n    root: "+root+"\n    vcs: none\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	now := time.Date(2026, 10, 6, 13, 0, 0, 0, time.Local)
+	now := time.Date(2026, 10, 7, 10, 0, 0, 0, time.Local)
 	actions.SetClock(func() time.Time { return now })
 	t.Cleanup(func() { actions.SetClock(nil) })
 	cfg, err := config.Load(cfgPath)
@@ -85,82 +91,123 @@ func setup(t *testing.T) *model {
 		t.Fatal(err)
 	}
 	m := newModel(cfgPath, cfg, "perso")
-	m.w, m.h = 120, 30
-	drive(t, m, m.load())
+	m.w, m.h = 130, 32
+	drive(t, m, m.loadLedger())
 	return m
 }
 
 func screen(m *model) string { return ansi.Strip(m.render()) }
 
-func TestAddDetailDoneAndKeys(t *testing.T) {
+func add(t *testing.T, m *model, title, at, notice string) {
+	t.Helper()
+	press(t, m, "a")
+	typeText(t, m, title)
+	press(t, m, "tab")
+	typeText(t, m, at)
+	press(t, m, "tab")
+	typeText(t, m, notice)
+	press(t, m, "ctrl+s")
+	if m.form != nil {
+		t.Fatalf("form still open: %s\n%s", m.form.err, screen(m))
+	}
+}
+
+func TestEmptyLedgerThenFormAndDetail(t *testing.T) {
 	m := setup(t)
-	if !strings.Contains(screen(m), "Le registre est vide") {
-		t.Fatalf("empty list:\n%s", screen(m))
+	if s := screen(m); !strings.Contains(s, "Le registre est vide") || !strings.Contains(s, "1 registre") {
+		t.Fatalf("empty ledger:\n%s", s)
 	}
 	press(t, m, "a")
-	typeText(t, m, "Renouveler le passeport")
-	press(t, m, "enter")
-	typeText(t, m, "20.10.2026")
-	press(t, m, "enter")
+	typeText(t, m, "Résilier Swisscom")
+	press(t, m, "tab")
+	typeText(t, m, "15.10.2026")
+	if s := screen(m); !strings.Contains(s, "→ jeu. 15.10.2026 (09:00) · dans 8 jours") {
+		t.Fatalf("live date:\n%s", s)
+	}
+	press(t, m, "tab")
 	typeText(t, m, "7d,1d")
-	press(t, m, "enter")
+	if s := screen(m); !strings.Contains(s, "→ message les 08.10 09:00 · 14.10 09:00") {
+		t.Fatalf("live notices:\n%s", s)
+	}
+	press(t, m, "ctrl+s")
 	s := screen(m)
-	if !strings.Contains(s, "E-0001 Renouveler le passeport") || !strings.Contains(s, "mar. 20.10.2026") {
-		t.Fatalf("after add:\n%s", s)
-	}
-	press(t, m, "enter")
-	s = screen(m)
-	if m.view != vDetail || !strings.Contains(s, "notice 7d") || !strings.Contains(s, "préavis") {
-		t.Fatalf("detail:\n%s", s)
-	}
-	press(t, m, "esc")
-	if m.view != vList {
-		t.Fatal("esc must go back to the list")
-	}
-	press(t, m, "esc")
-	if press(t, m, "esc"); m.view != vList {
-		t.Fatal("esc in the list must not quit")
-	}
-	press(t, m, "d")
-	if !strings.Contains(screen(m), "E-0001 faite") || len(m.items) != 0 {
-		t.Fatalf("after done:\n%s", screen(m))
-	}
-	if cmd := press(t, m, "q"); cmd == nil {
-		t.Fatal("q must quit")
+	for _, want := range []string{"Ce mois-ci", "Résilier Swisscom", "dans 8 j", "Calendrier", "préavis 7d", "terme", "1 échéance ouverte"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("missing %q:\n%s", want, s)
+		}
 	}
 }
 
-func TestQTypesInPrompt(t *testing.T) {
+func TestFormEditsTheEntry(t *testing.T) {
 	m := setup(t)
-	press(t, m, "/")
-	press(t, m, "q")
-	if m.prompt != pFilter || m.filter != "q" {
-		t.Fatalf("q must be typed in the filter, got %q", m.filter)
+	add(t, m, "Passeport", "01.12.2026", "30d")
+	press(t, m, "e")
+	if m.form == nil || m.form.val("title") != "Passeport" || m.form.val("notice") != "30d" {
+		t.Fatal("e opens the form filled in")
+	}
+	typeText(t, m, " d'Eve")
+	press(t, m, "ctrl+s")
+	if s := screen(m); !strings.Contains(s, "Passeport d'Eve") || !strings.Contains(s, "E-0001 modifiée") {
+		t.Fatalf("after edit:\n%s", s)
 	}
 }
 
-func TestLedgerFirstThenSources(t *testing.T) {
+func TestViewsEscAndDone(t *testing.T) {
 	m := setup(t)
-	press(t, m, "a")
-	typeText(t, m, "Garantie lave-linge")
-	press(t, m, "enter")
-	typeText(t, m, "2028-03-01")
-	press(t, m, "enter")
-	press(t, m, "enter")
-	if s := screen(m); !strings.Contains(s, "registre") || !strings.Contains(s, "Garantie lave-linge") {
-		t.Fatalf("the ledger shows every date, beyond the horizon:\n%s", s)
+	add(t, m, "Garantie lave-linge", "01.03.2028", "")
+	if s := screen(m); !strings.Contains(s, "Plus tard") || !strings.Contains(s, "Garantie lave-linge") {
+		t.Fatalf("the ledger shows every date:\n%s", s)
 	}
 	press(t, m, "s")
-	if s := screen(m); !strings.Contains(s, "toutes") || strings.Contains(s, "Garantie") {
+	if s := screen(m); !strings.Contains(s, "Rien d'échu") || !strings.Contains(s, "jusqu'au") {
 		t.Fatalf("toutes keeps the horizon:\n%s", s)
 	}
 	press(t, m, "esc")
-	if !m.ledgerOnly() || len(m.items) != 1 {
-		t.Fatal("esc must come back to the ledger")
+	if !m.ledgerOnly() {
+		t.Fatal("esc comes back to the ledger")
+	}
+	press(t, m, "esc")
+	if press(t, m, "esc"); !m.ledgerOnly() {
+		t.Fatal("esc never quits")
 	}
 	press(t, m, "d")
+	if len(m.items) != 0 {
+		t.Fatal("a done entry leaves the list")
+	}
 	press(t, m, "f")
-	if s := screen(m); !strings.Contains(s, "faites comprises") || !strings.Contains(s, "Garantie") {
+	if s := screen(m); !strings.Contains(s, "Faites et abandonnées") {
 		t.Fatalf("f shows done entries:\n%s", s)
+	}
+}
+
+func TestQ(t *testing.T) {
+	m := setup(t)
+	press(t, m, "/")
+	press(t, m, "q")
+	if m.filter != "q" {
+		t.Fatalf("q is typed in the filter, got %q", m.filter)
+	}
+	press(t, m, "esc")
+	press(t, m, "a")
+	press(t, m, "q")
+	if m.form == nil || m.form.val("title") != "q" {
+		t.Fatal("q is typed in the form")
+	}
+	press(t, m, "esc")
+	if cmd := press(t, m, "q"); cmd == nil {
+		t.Fatal("q quits")
+	}
+}
+
+func TestNarrowStacksTheDetail(t *testing.T) {
+	m := setup(t)
+	add(t, m, "Impôts", "31.03.2027", "")
+	m.w, m.h = 80, 30
+	if s := screen(m); !strings.Contains(s, "┄") || !strings.Contains(s, "Calendrier") {
+		t.Fatalf("narrow: detail below the list:\n%s", s)
+	}
+	press(t, m, "tab")
+	if s := screen(m); strings.Contains(s, "Calendrier") {
+		t.Fatalf("tab hides the detail:\n%s", s)
 	}
 }
