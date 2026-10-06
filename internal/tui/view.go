@@ -20,13 +20,21 @@ func (m *model) render() string {
 	var head string
 	if m.view == vDetail {
 		head = sTitle.Render("due") + sMuted.Render(" · "+m.sphere+" · ") + sBold.Render(m.detailItem.Title)
+	} else if m.ledgerOnly() {
+		kind := "ouvertes"
+		if m.showDone {
+			kind = "toutes, faites comprises"
+		}
+		head = sTitle.Render("due") + sMuted.Render(" · "+m.sphere+" · ") + sBold.Render("registre") +
+			sMuted.Render(fmt.Sprintf(" · %d échéances %s", len(m.items), kind))
 	} else {
-		head = sTitle.Render("due") + sMuted.Render(" · "+m.sphere+" · jusqu'au ")
+		head = sTitle.Render("due") + sMuted.Render(" · "+m.sphere+" · ") + sBold.Render(m.sourceName()) + sMuted.Render(" · jusqu'au ")
 		if m.listing != nil {
 			head += sText.Render(when.Day(m.listing.Until))
 		}
-		head += sMuted.Render(fmt.Sprintf(" (%s) · source : ", horizons[m.horizon])) + sText.Render(m.sourceName())
-		head += sMuted.Render(fmt.Sprintf(" · %d lignes", len(m.items)))
+		head += sMuted.Render(fmt.Sprintf(" (%s) · %d lignes", horizons[m.horizon], len(m.items)))
+	}
+	if m.view != vDetail {
 		if m.filter != "" {
 			head += sMuted.Render(" · filtre : ") + sWarn.Render(m.filter)
 		}
@@ -70,16 +78,19 @@ func (m *model) footer() string {
 		}
 		return helpLine("esc", "retour", "q", "quitter")
 	}
-	return helpLine("↵", "détail", "a", "ajouter", "d", "faite", "z", "reporter", "/", "chercher", "s", "source", "h", "horizon", "?", "aide", "q", "quitter")
+	if m.ledgerOnly() {
+		return helpLine("↵", "détail", "a", "ajouter", "d", "faite", "z", "reporter", "f", "faites", "/", "chercher", "s", "autres sources", "?", "aide", "q", "quitter")
+	}
+	return helpLine("↵", "détail", "a", "ajouter", "/", "chercher", "s", "source", "h", "horizon", "esc", "registre", "?", "aide", "q", "quitter")
 }
 
 func (m *model) helpLines() []string {
 	out := []string{
 		sSection.Render("Aide"),
-		helpLine("↑↓ j k", "se déplacer", "g G", "début, fin", "↵", "détail", "esc", "retour, efface le filtre puis la source"),
+		helpLine("↑↓ j k", "se déplacer", "g G", "début, fin", "↵", "détail", "esc", "retour, efface le filtre, revient au registre"),
 		helpLine("a", "ajouter au registre", "d", "faite / rouvrir", "z", "reporter", "e", "éditer le fichier", "x", "abandonner", "D", "supprimer"),
-		helpLine("R", "exécuter l'action maintenant", "/", "chercher", "s", "changer de source", "h", "changer d'horizon", "r", "relire"),
-		sMuted.Render("Les lignes des connecteurs se lisent ici et se modifient dans leur outil. ! = en retard."),
+		helpLine("R", "exécuter l'action", "f", "faites aussi (registre)", "/", "chercher", "s", "registre, toutes, chaque connecteur", "h", "horizon", "r", "relire"),
+		sMuted.Render("Le registre garde ce qu'aucun autre outil ne porte. Les autres lignes se lisent ici et se modifient dans leur outil. ! = en retard."),
 	}
 	if m.listing != nil {
 		for _, e := range m.listing.Errors {
@@ -94,6 +105,9 @@ func (m *model) listLines(h int) []string {
 	if len(m.items) == 0 {
 		if m.loading {
 			return []string{sMuted.Render("  chargement…")}
+		}
+		if m.ledgerOnly() {
+			return []string{sMuted.Render("  Le registre est vide : a pour ajouter, s pour voir les autres sources.")}
 		}
 		return []string{sMuted.Render("  Rien d'échu dans cette fenêtre.")}
 	}

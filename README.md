@@ -3,8 +3,9 @@
 Every date that falls due, in one list, and actions fired at a date. One Go
 binary: CLI, MCP server (`due mcp`) and terminal interface (`due tui`).
 
-- **Ledger**: due's own entries, one Markdown file each (`~/due/<sphere>/E-0001.md`),
-  versioned with jj. An entry has a date, notices before it (`7d,1d`) and an
+- **Ledger**: what no other tool carries (a contract's end, a warranty, a legal
+  delay), one Markdown file each (`~/due/<sphere>/E-0001.md`), versioned with jj.
+  due never writes into reminders or calendars. An entry has a date, notices before it (`7d,1d`) and an
   action at the term: `tell`, `agent` or `command`.
 - **Connectors**: dates read live from other tools, never copied: Apple
   Reminders and Calendar (`macos`), office waits, routine runs, oj sittings and
@@ -49,9 +50,12 @@ bare, as `{"items": [...]}` or as `{"ok": true, "result": [...]}`.
 
 ## TUI
 
+It opens on the ledger, at any date. `s` cycles to everything (ledger and
+connectors within the horizon), then to each connector; `esc` comes back.
+
 `↵` detail · `a` add · `d` done/reopen · `z` snooze · `e` edit the file ·
-`x` drop · `R` run now · `/` search · `s` source · `h` horizon · `?` help ·
-`esc` back · `q` quit.
+`x` drop · `R` run now · `f` done entries too · `/` search · `s` source ·
+`h` horizon · `?` help · `esc` back · `q` quit.
 
 ## License
 

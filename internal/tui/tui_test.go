@@ -94,7 +94,7 @@ func screen(m *model) string { return ansi.Strip(m.render()) }
 
 func TestAddDetailDoneAndKeys(t *testing.T) {
 	m := setup(t)
-	if !strings.Contains(screen(m), "Rien d'échu") {
+	if !strings.Contains(screen(m), "Le registre est vide") {
 		t.Fatalf("empty list:\n%s", screen(m))
 	}
 	press(t, m, "a")
@@ -136,5 +136,31 @@ func TestQTypesInPrompt(t *testing.T) {
 	press(t, m, "q")
 	if m.prompt != pFilter || m.filter != "q" {
 		t.Fatalf("q must be typed in the filter, got %q", m.filter)
+	}
+}
+
+func TestLedgerFirstThenSources(t *testing.T) {
+	m := setup(t)
+	press(t, m, "a")
+	typeText(t, m, "Garantie lave-linge")
+	press(t, m, "enter")
+	typeText(t, m, "2028-03-01")
+	press(t, m, "enter")
+	press(t, m, "enter")
+	if s := screen(m); !strings.Contains(s, "registre") || !strings.Contains(s, "Garantie lave-linge") {
+		t.Fatalf("the ledger shows every date, beyond the horizon:\n%s", s)
+	}
+	press(t, m, "s")
+	if s := screen(m); !strings.Contains(s, "toutes") || strings.Contains(s, "Garantie") {
+		t.Fatalf("toutes keeps the horizon:\n%s", s)
+	}
+	press(t, m, "esc")
+	if !m.ledgerOnly() || len(m.items) != 1 {
+		t.Fatal("esc must come back to the ledger")
+	}
+	press(t, m, "d")
+	press(t, m, "f")
+	if s := screen(m); !strings.Contains(s, "faites comprises") || !strings.Contains(s, "Garantie") {
+		t.Fatalf("f shows done entries:\n%s", s)
 	}
 }

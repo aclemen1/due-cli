@@ -79,9 +79,10 @@ type model struct {
 	sel     int
 	top     int
 
-	horizon int
-	source  int // 0: every source; then due, then each connector
-	filter  string
+	horizon  int
+	source   int // index in views(): 0 the ledger, 1 everything, then each connector
+	filter   string
+	showDone bool
 
 	detail     *actions.Detail
 	detailItem connect.Item
@@ -124,14 +125,15 @@ type detailMsg struct {
 	err error
 }
 
-func (m *model) sources() []string { return actions.SourceNames(m.cfg.Spheres[m.sphere]) }
-
-func (m *model) sourceName() string {
-	if m.source == 0 {
-		return "toutes"
-	}
-	return m.sources()[m.source-1]
+// views are the sources shown in turn by s: the ledger alone, everything, then each connector.
+func (m *model) views() []string {
+	return append([]string{"registre", "toutes"}, actions.SourceNames(m.cfg.Spheres[m.sphere])[1:]...)
 }
+
+func (m *model) sourceName() string { return m.views()[m.source] }
+
+// ledgerOnly: the ledger at any date, without connectors and horizon.
+func (m *model) ledgerOnly() bool { return m.source == 0 }
 
 func (m *model) ctx(args map[string]any) *spec.Context {
 	args["sphere"] = m.sphere
@@ -140,14 +142,17 @@ func (m *model) ctx(args map[string]any) *spec.Context {
 
 func (m *model) load() tea.Cmd {
 	m.loading = true
-	horizon := horizons[m.horizon]
+	q := actions.Query{Until: horizons[m.horizon]}
+	if m.ledgerOnly() {
+		q = actions.Query{Until: "36500d", Sources: []string{"due"}, All: m.showDone}
+	}
 	ctx := m.ctx(map[string]any{})
 	return func() tea.Msg {
 		cfg, l, err := actions.Open(ctx)
 		if err != nil {
 			return loadedMsg{err: err}
 		}
-		res, err := actions.List(cfg, l, actions.Query{Until: horizon})
+		res, err := actions.List(cfg, l, q)
 		return loadedMsg{listing: res, err: err}
 	}
 }
@@ -195,7 +200,10 @@ func (m *model) apply() {
 		return
 	}
 	src := ""
-	if m.source > 0 {
+	switch {
+	case m.ledgerOnly():
+		src = "due"
+	case m.source > 1:
 		src = m.sourceName()
 	}
 	needle := strings.ToLower(m.filter)
@@ -316,18 +324,33 @@ func (m *model) keyList(k tea.KeyPressMsg) tea.Cmd {
 		switch {
 		case m.filter != "":
 			m.filter = ""
-		case m.source != 0:
-			m.source = 0
+		case !m.ledgerOnly():
+			m.source, m.sel = 0, 0
+			return m.load()
 		}
 		m.apply()
 	case "/":
 		return m.ask(pFilter, "texte à chercher", m.filter)
 	case "h":
+		if m.ledgerOnly() {
+			m.setStatus("le registre montre toutes les dates ; s pour la vue avec horizon", false)
+			return nil
+		}
 		m.horizon = (m.horizon + 1) % len(horizons)
 		return m.load()
+	case "f":
+		if !m.ledgerOnly() {
+			return nil
+		}
+		m.showDone = !m.showDone
+		return m.load()
 	case "s":
-		m.source = (m.source + 1) % (len(m.sources()) + 1)
+		was := m.ledgerOnly()
+		m.source = (m.source + 1) % len(m.views())
 		m.sel = 0
+		if was != m.ledgerOnly() {
+			return m.load()
+		}
 		m.apply()
 	case "r":
 		return m.load()

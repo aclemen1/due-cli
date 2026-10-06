@@ -83,7 +83,7 @@ func registerEntries() {
 	spec.Register(&spec.Action{
 		Category: "due", Name: "add", Top: true,
 		Summary: "Add an entry to the ledger: a date, notices before it, and an action at the term.",
-		Discussion: "A date alone (2026-11-15) fires at the default time (09:00). Each notice tells at its delay before the term; " +
+		Discussion: "The ledger holds what no other tool carries (a contract, a warranty, a legal delay): a date already in a reminder, a calendar, office or a routine stays there and is not added. A date alone (2026-11-15) fires at the default time (09:00). Each notice tells at its delay before the term; " +
 			"the term runs the action: tell (a message to Alain), agent (the body as a prompt), command (--run in a shell). " +
 			"Without --do, the entry is only listed and its notices still tell. The launcher (due launcher install) fires them.",
 		Params: []spec.Param{

@@ -22,6 +22,10 @@ due show E-0007 --sphere perso
 
 ## Write (ledger only)
 
+The ledger holds what no other tool carries: a contract's end, a warranty, a legal delay, a renewal.
+A date already in a reminder, a calendar, office or a routine stays there: check with `due ls --search <mot>` before `due add`.
+due never creates a reminder or a calendar event.
+
 ```bash
 due add "<titre>" --at 2026-11-15 --notice 7d,1d --sphere perso
 due add "<titre>" --at "2026-11-15 14:00" --do tell --body "<message>" --sphere perso
