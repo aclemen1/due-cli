@@ -365,6 +365,9 @@ func (m *model) lineDetail(it connect.Item, w int) []string {
 		field("sphère", sphereTag(it.Sphere)),
 		field("id", sText.Render(it.ID)),
 	}
+	if it.Since != nil {
+		out = append(out, field("attente", sText.Render("depuis le "+when.Day(*it.Since)+" ("+relShort(*it.Since, m.now())+")")))
+	}
 	out = append(out, m.verdict(it)...)
 	if it.Detail != "" {
 		for i, l := range wrap(it.Detail, w-11) {

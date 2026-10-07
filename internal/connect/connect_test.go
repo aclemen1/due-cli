@@ -72,3 +72,22 @@ echo '{"ok":true,"result":[
 		t.Fatalf("got %+v", items)
 	}
 }
+
+func TestOfficeWaitingSince(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "office")
+	body := `#!/bin/sh
+echo '{"ok":true,"result":[{"id":"P-0007","title":"Sinistre","waiting_on":"AXA","wait_until":"2026-10-16T23:59:59+02:00","waiting_since":"2026-09-01T10:00:00+02:00"}]}'
+`
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.Local)
+	items, err := One(config.Connector{Name: "office", Type: "office", Bin: script}, Window{Until: now.AddDate(0, 0, 30), Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Since == nil || items[0].Detail != "attend AXA · depuis 36 j" {
+		t.Fatalf("got %+v", items)
+	}
+}

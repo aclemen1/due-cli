@@ -36,6 +36,7 @@ type Query struct {
 	Sources  []string // connector names, due for the ledger; empty: all
 	All      bool     // done and dropped entries of the ledger too
 	Critical bool     // only the lines the judge finds critical
+	Waiting  string   // only the office lines waiting for at least this long, e.g. 30d
 	Search   string
 }
 
@@ -162,10 +163,11 @@ func registerList() {
 			{Name: "source", Kind: spec.StringList, Help: "Keep these sources: due (the ledger) or a connector's name. Repeatable."},
 			{Name: "all", Kind: spec.Bool, Help: "Keep done and dropped entries of the ledger."},
 			{Name: "critical", Kind: spec.Bool, Help: "Keep the lines the judge finds critical if forgotten (due assess)."},
+			{Name: "waiting-since", Kind: spec.String, Help: "Keep the office dossiers waiting for at least this long, e.g. 30d. Waits without a deadline are not lines of due: use office ls --waiting-since."},
 			{Name: "search", Kind: spec.String, Help: "Keep lines whose title or detail contain this text."},
 			readSphereParam(),
 		},
-		Examples: []string{"due ls", "due ls --until 7d --format text", "due ls --source due --all --sphere pro"},
+		Examples: []string{"due ls", "due ls --until 7d --format text", "due ls --source due --all --sphere pro", "due ls --source office --waiting-since 30d"},
 		Run: func(ctx *spec.Context) (any, error) {
 			cfg, err := config.Load(ctx.Config)
 			if err != nil {
@@ -183,7 +185,7 @@ func registerList() {
 					}
 				}
 			}
-			res, err := ListAll(ctx, cfg, spheres, Query{Until: ctx.Str("until"), From: ctx.Str("from"), Sources: sources, All: ctx.Bool("all"), Critical: ctx.Bool("critical"), Search: ctx.Str("search")})
+			res, err := ListAll(ctx, cfg, spheres, Query{Until: ctx.Str("until"), From: ctx.Str("from"), Sources: sources, All: ctx.Bool("all"), Critical: ctx.Bool("critical"), Waiting: ctx.Str("waiting-since"), Search: ctx.Str("search")})
 			if err != nil {
 				return nil, err
 			}
@@ -289,6 +291,19 @@ func ListAll(ctx *spec.Context, cfg *config.Config, spheres []string, q Query) (
 		}
 	}
 	judge.Annotate(out.Items)
+	if q.Waiting != "" {
+		d, err := when.ParseDuration(q.Waiting)
+		if err != nil {
+			return nil, spec.UserError("--waiting-since: %v", err)
+		}
+		kept := []connect.Item{}
+		for _, it := range out.Items {
+			if it.Since != nil && !it.Since.After(Now().Add(-d)) {
+				kept = append(kept, it)
+			}
+		}
+		out.Items = kept
+	}
 	if q.Critical {
 		kept := []connect.Item{}
 		for _, it := range out.Items {

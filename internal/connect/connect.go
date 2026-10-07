@@ -35,6 +35,8 @@ type Item struct {
 	// Critical is the judge's probability that forgetting the line costs dearly; nil until judged.
 	Critical *float64 `json:"critical,omitempty"`
 	Nature   string   `json:"nature,omitempty"` // legal, financial, irreversible, none
+	// Since is when an office dossier went waiting.
+	Since *time.Time `json:"waiting_since,omitempty"`
 }
 
 // Window is the span asked for. From is zero to keep what is late.
@@ -303,6 +305,7 @@ func office(ctx context.Context, c config.Connector, w Window) ([]Item, error) {
 		Title     string `json:"title"`
 		WaitingOn string `json:"waiting_on"`
 		WaitUntil string `json:"wait_until"`
+		Since     string `json:"waiting_since"`
 	}
 	if err := run(ctx, &res, bin(c, "office"), args...); err != nil {
 		return nil, err
@@ -318,7 +321,13 @@ func office(ctx context.Context, c config.Connector, w Window) ([]Item, error) {
 		if d.WaitingOn != "" {
 			detail = "attend " + d.WaitingOn
 		}
-		out = append(out, Item{ID: d.ID, Title: d.Title, At: t, Detail: detail, Ref: "office:" + d.ID})
+		it := Item{ID: d.ID, Title: d.Title, At: t, Detail: detail, Ref: "office:" + d.ID}
+		if s, ok := parseTime(d.Since, loc); d.Since != "" && ok {
+			it.Since = &s
+			days := int(w.Now.Sub(s).Hours() / 24)
+			it.Detail = strings.TrimPrefix(fmt.Sprintf("%s · depuis %d j", detail, days), " · ")
+		}
+		out = append(out, it)
 	}
 	return out, nil
 }
