@@ -1,6 +1,7 @@
 package trigger
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -28,5 +29,21 @@ func TestChannels(t *testing.T) {
 	}
 	if tmpl, used := ChannelCommand(l, Mail); used != Tell || tmpl[0] != "t" {
 		t.Errorf("no mail command falls back to tell: %v %s", tmpl, used)
+	}
+}
+
+func TestFailedChannelFallsBackToTell(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DUE_STATE", dir)
+	l := &ledger.Ledger{Sphere: "perso", Clock: "09:00", Now: time.Now, Actions: config.Actions{
+		Push: []string{"false"},
+		Tell: []string{"sh", "-c", "echo \"$0\" > " + dir + "/told", "{message}"},
+	}}
+	used, err := Send(l, Push, "urgent")
+	if err != nil || used != Tell {
+		t.Fatalf("push failed, tell must take it: %s %v", used, err)
+	}
+	if b, _ := os.ReadFile(dir + "/told"); string(b) != "urgent\n" {
+		t.Fatalf("told %q", b)
 	}
 }

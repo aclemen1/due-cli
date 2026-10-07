@@ -52,7 +52,7 @@ due done 7 --note "<résultat>" --sphere perso
 | notice under 7 days, term of `--do tell`, critical alert | `tell` |
 | critical line on its day or late, term of a critical entry | `push` |
 
-A channel without a command in `actions` falls back to `tell`.
+A channel without a command in `actions`, or whose send fails, falls back to `tell`.
 
 ## Critical lines
 

@@ -109,7 +109,23 @@ func Execute(l *ledger.Ledger, e *ledger.Entry, i ledger.Instant, now time.Time,
 		return err
 	}
 	defer out.Close()
-	fmt.Fprintf(out, "# %s %s (%s) at %s\n# %s\n", e.ID, i.Kind, l.Sphere, now.Format(time.RFC3339), strings.Join(argv, " "))
+	fmt.Fprintf(out, "# %s %s (%s) at %s\n", e.ID, i.Kind, l.Sphere, now.Format(time.RFC3339))
+	err = run(l, e, i, argv, cwd, timeout, out)
+	// A message that fails on mail or push goes again on tell.
+	tellLike := !strings.HasPrefix(i.Kind, "term") || e.Do == "tell"
+	if err != nil && tellLike && EntryChannel(l, e, i) != Tell {
+		fmt.Fprintf(out, "# %v; again on tell\n", err)
+		copy := *e
+		copy.Via = Tell
+		if argv, cwd, err = Command(l, &copy, i, now); err == nil {
+			err = run(l, e, i, argv, cwd, timeout, out)
+		}
+	}
+	return err
+}
+
+func run(l *ledger.Ledger, e *ledger.Entry, i ledger.Instant, argv []string, cwd string, timeout time.Duration, out *os.File) error {
+	fmt.Fprintf(out, "# %s\n", strings.Join(argv, " "))
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
@@ -119,7 +135,7 @@ func Execute(l *ledger.Ledger, e *ledger.Entry, i ledger.Instant, now time.Time,
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
 	cmd.WaitDelay = 5 * time.Second
-	err = cmd.Run()
+	err := cmd.Run()
 	if ctx.Err() == context.DeadlineExceeded {
 		return fmt.Errorf("timeout after %s", timeout)
 	}
@@ -277,7 +293,14 @@ func Send(l *ledger.Ledger, channel, message string) (string, error) {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, argv[0], argv[1:]...).CombinedOutput()
 	if err != nil {
-		return used, fmt.Errorf("%s: %v: %s", argv[0], err, strings.TrimSpace(string(out)))
+		err = fmt.Errorf("%s: %v: %s", argv[0], err, strings.TrimSpace(string(out)))
+		if used != Tell {
+			// A message that fails on mail or push goes again on tell.
+			if _, err2 := Send(l, Tell, message); err2 == nil {
+				return Tell, nil
+			}
+		}
+		return used, err
 	}
 	return used, nil
 }
