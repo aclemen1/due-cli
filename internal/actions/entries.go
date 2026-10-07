@@ -92,6 +92,7 @@ func registerEntries() {
 			{Name: "at", Kind: spec.String, Required: true, Help: "Date: 2026-11-15, 2026-11-15 14:00, 15.11.2026, tomorrow, 3d."},
 			{Name: "notice", Kind: spec.StringList, Help: "Delays before the term, repeatable or comma-separated: 7d,1d,2h."},
 			{Name: "do", Kind: spec.String, Enum: ledger.Dos, Help: "Action at the term."},
+			{Name: "via", Kind: spec.String, Enum: ledger.Vias, Help: "Channel of the notices and of a tell: mail, tell or push. Default: mail for a notice a week ahead or more, tell closer, push for a critical term."},
 			{Name: "run", Kind: spec.String, Help: "Shell command of --do command."},
 			{Name: "cwd", Kind: spec.String, Help: "Directory of the action. Defaults to the home directory."},
 			{Name: "ref", Kind: spec.String, Help: "What the entry belongs to, e.g. office:P-0040."},
@@ -130,7 +131,7 @@ func registerEntries() {
 			if title == "" {
 				return nil, spec.UserError("the title is empty")
 			}
-			e := &ledger.Entry{Title: title, At: m.String(), Notice: ns, Do: ctx.Str("do"), Run: ctx.Str("run"),
+			e := &ledger.Entry{Title: title, At: m.String(), Notice: ns, Do: ctx.Str("do"), Via: ctx.Str("via"), Run: ctx.Str("run"),
 				Cwd: ctx.Str("cwd"), Ref: ctx.Str("ref"), State: ledger.Open, Created: now.Format(time.RFC3339), Body: b}
 			err = l.WriteAs(func() (string, error) {
 				e.ID = l.NextID()
@@ -194,6 +195,7 @@ func registerEntries() {
 			{Name: "at", Kind: spec.String, Help: "New date."},
 			{Name: "notice", Kind: spec.StringList, Help: "New notices, or none."},
 			{Name: "do", Kind: spec.String, Enum: append([]string{"none"}, ledger.Dos...), Help: "New action, or none."},
+			{Name: "via", Kind: spec.String, Enum: append([]string{"auto"}, ledger.Vias...), Help: "New channel, or auto for the default by attention."},
 			{Name: "run", Kind: spec.String, Help: "New command of --do command."},
 			{Name: "cwd", Kind: spec.String, Help: "New directory of the action."},
 			{Name: "ref", Kind: spec.String, Help: "New ref; empty clears it."},
@@ -235,6 +237,13 @@ func registerEntries() {
 						e.Do, e.Run = "", ""
 					}
 					what = append(what, "do "+ctx.Str("do"))
+				}
+				if _, ok := ctx.Args["via"]; ok {
+					e.Via = ctx.Str("via")
+					if e.Via == "auto" {
+						e.Via = ""
+					}
+					what = append(what, "via "+ctx.Str("via"))
 				}
 				if _, ok := ctx.Args["run"]; ok {
 					e.Run = ctx.Str("run")

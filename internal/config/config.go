@@ -65,7 +65,9 @@ type Sphere struct {
 // Actions are the commands run when an entry fires. Placeholders: {id}, {dossier} (office:<id> of the ref, else desk),
 // {title}, {message}, {prompt}, {at}, {when}, {sphere}, {cwd}, {ref}.
 type Actions struct {
-	Tell    []string `yaml:"tell,omitempty"`
+	Mail    []string `yaml:"mail,omitempty"` // what can wait: far notices, digests; falls back to tell
+	Tell    []string `yaml:"tell,omitempty"` // what needs attention now
+	Push    []string `yaml:"push,omitempty"` // urgencies; falls back to tell
 	Agent   []string `yaml:"agent,omitempty"`
 	Shell   string   `yaml:"shell,omitempty"`   // runs do: command, default /bin/zsh
 	Timeout string   `yaml:"timeout,omitempty"` // per action, default 10min

@@ -38,7 +38,9 @@ spheres:
     prefix: P                    # ids PE-0001
     horizon: 30d
     actions:                     # placeholders: {id} {title} {message} {prompt} {dossier} {ref} {at} {when} {cwd}
+      mail: ["office", "tell", "{dossier}", "--office", "~/offices/perso", "--source", "mail", "--text", "{message}"]      # can wait
       tell: ["office", "tell", "{dossier}", "--office", "~/offices/perso", "--text", "{message}"]
+      push: ["office", "tell", "{dossier}", "--office", "~/offices/perso", "--source", "pushover", "--text", "{message}"] # urgent
       agent: ["office", "notify", "desk", "{dossier}", "--office", "~/offices/perso", "--text", "{prompt}"]
     connectors:
       - {name: rappels, type: reminders, exclude_tags: [pro]}

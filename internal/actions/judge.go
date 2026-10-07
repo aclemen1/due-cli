@@ -174,9 +174,28 @@ func RunAlerts(ctx *spec.Context, cfg *config.Config, spheres []string, dry bool
 			out.Errors = append(out.Errors, err.Error())
 			continue
 		}
-		var notices, digest []string
-		var marks []string
+		// Per channel: the lines of each kind of message, and the marks they set once sent.
+		lines := map[string]map[string][]string{} // channel → heading → lines
+		marks := map[string][]string{}
+		add := func(ch, heading, line, mark string) {
+			if lines[ch] == nil {
+				lines[ch] = map[string][]string{}
+			}
+			if line != "" {
+				lines[ch][heading] = append(lines[ch][heading], line)
+			}
+			if mark != "" {
+				marks[ch] = append(marks[ch], mark)
+			}
+		}
+		const (
+			hSoon   = "Échéances critiques à ne pas oublier :"
+			hToday  = "Échéances critiques aujourd'hui :"
+			hLate   = "Échéances critiques dépassées :"
+			hDigest = "Échéances critiques jusqu'au %s :"
+		)
 		seen := map[string]bool{}
+		var digest []string
 		for _, it := range res.Items {
 			if it.Sphere != sp || !judge.IsCritical(it, cfg.Judge.Threshold) {
 				continue
@@ -187,53 +206,88 @@ func RunAlerts(ctx *spec.Context, cfg *config.Config, spheres []string, dry bool
 			same := strings.ToLower(it.Title) + "|" + it.At.Format("2006-01-02")
 			dup := seen[same]
 			seen[same] = true
-			if digestDay && !dup && !it.At.After(digestUntil) {
-				digest = append(digest, alertLine(it, now))
+			line := alertLine(it, now)
+			if dup {
+				line = ""
 			}
-			if it.Late {
+			if digestDay && line != "" && !it.At.After(digestUntil) {
+				digest = append(digest, line)
+			}
+			k := judge.Key(it)
+			switch {
+			case it.Late:
+				// Over and still open: an urgency, once.
+				if _, sent := state[k+"|late"]; !sent && !it.At.Before(now.AddDate(0, 0, -7)) {
+					add(trigger.Push, hLate, line, k+"|late")
+				}
+				continue
+			case it.At.Format("2006-01-02") == today:
+				if _, sent := state[k+"|day"]; !sent {
+					add(trigger.Push, hToday, line, k+"|day")
+				}
 				continue
 			}
-			for _, n := range cfg.Judge.Notice {
+			// The closest notice already reached is the one that speaks.
+			for _, n := range closestFirst(cfg.Judge.Notice) {
 				d, err := when.Before(it.At, n)
 				if err != nil || d.Format("2006-01-02") > today {
 					continue
 				}
-				k := judge.Key(it) + "|" + n
-				if _, sent := state[k]; sent {
-					continue
+				if _, sent := state[k+"|"+n]; sent {
+					break
 				}
-				marks = append(marks, k)
-				if !dup {
-					notices = append(notices, alertLine(it, now))
-				}
+				add(trigger.NoticeChannel(n), hSoon, line, k+"|"+n)
 				break
 			}
 		}
-		var parts []string
-		if len(notices) > 0 {
-			parts = append(parts, "Échéances critiques à ne pas oublier :\n"+strings.Join(notices, "\n"))
-		}
 		dk := "digest:" + sp
 		if digestDay && state[dk] != today && len(digest) > 0 {
-			parts = append(parts, fmt.Sprintf("Échéances critiques jusqu'au %s :\n%s", when.Day(digestUntil), strings.Join(digest, "\n")))
-			marks = append(marks, dk)
+			h := fmt.Sprintf(hDigest, when.Day(digestUntil))
+			for _, d := range digest {
+				add(trigger.Mail, h, d, "")
+			}
+			add(trigger.Mail, h, "", dk)
 		}
-		if len(parts) == 0 {
-			continue
+		for _, ch := range trigger.Channels {
+			if len(marks[ch]) == 0 {
+				continue
+			}
+			var parts []string
+			for _, h := range []string{hLate, hToday, hSoon} {
+				if ls := lines[ch][h]; len(ls) > 0 {
+					parts = append(parts, h+"\n"+strings.Join(ls, "\n"))
+				}
+			}
+			for h, ls := range lines[ch] {
+				if strings.HasPrefix(h, "Échéances critiques jusqu'au") {
+					parts = append(parts, h+"\n"+strings.Join(ls, "\n"))
+				}
+			}
+			if len(parts) == 0 {
+				if !dry {
+					for _, k := range marks[ch] {
+						state[k] = today // only duplicates: nothing new to say
+					}
+				}
+				continue
+			}
+			msg := strings.Join(parts, "\n\n")
+			key := sp + "/" + ch
+			if dry {
+				out.Pending[key] = msg
+				continue
+			}
+			if used, err := trigger.Send(l, ch, msg); err != nil {
+				out.Errors = append(out.Errors, key+": "+err.Error())
+				continue
+			} else if used != ch {
+				key += " (par " + used + ")"
+			}
+			for _, k := range marks[ch] {
+				state[k] = today
+			}
+			out.Sent[key] = msg
 		}
-		msg := strings.Join(parts, "\n\n")
-		if dry {
-			out.Pending[sp] = msg
-			continue
-		}
-		if err := trigger.Tell(l, msg); err != nil {
-			out.Errors = append(out.Errors, sp+": "+err.Error())
-			continue
-		}
-		for _, k := range marks {
-			state[k] = today
-		}
-		out.Sent[sp] = msg
 	}
 	if !dry {
 		if err := state.save(); err != nil {
@@ -379,4 +433,15 @@ func registerJudge() {
 			}
 		},
 	})
+}
+
+// closestFirst orders notice delays from the shortest.
+func closestFirst(ns []string) []string {
+	out := append([]string(nil), ns...)
+	sort.SliceStable(out, func(i, j int) bool {
+		a, _ := when.ParseDuration(out[i])
+		b, _ := when.ParseDuration(out[j])
+		return a < b
+	})
+	return out
 }

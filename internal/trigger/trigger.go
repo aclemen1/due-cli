@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/aclemen1/due-cli/internal/config"
+	"github.com/aclemen1/due-cli/internal/connect"
+	"github.com/aclemen1/due-cli/internal/judge"
 	"github.com/aclemen1/due-cli/internal/ledger"
 	"github.com/aclemen1/due-cli/internal/spec"
 	"github.com/aclemen1/due-cli/internal/when"
@@ -60,7 +62,7 @@ func Command(l *ledger.Ledger, e *ledger.Entry, i ledger.Instant, now time.Time)
 	var tmpl []string
 	switch do {
 	case "tell":
-		tmpl = l.Actions.Tell
+		tmpl, _ = ChannelCommand(l, EntryChannel(l, e, i))
 	case "agent":
 		tmpl = l.Actions.Agent
 	case "command":
@@ -255,15 +257,17 @@ func settle(l *ledger.Ledger, j job, now time.Time) Fired {
 // StopFile, when present, keeps every tick from firing.
 func StopFile() string { return filepath.Join(config.StateDir(), "stopped") }
 
-// Tell sends a message to the owner through the sphere's tell command.
-func Tell(l *ledger.Ledger, message string) error {
-	if len(l.Actions.Tell) == 0 {
-		return spec.UserError("no tell command for sphere %s: set spheres.%s.actions.tell in %s", l.Sphere, l.Sphere, config.Path(""))
+// Send writes to the owner on a channel of the sphere, or on tell when that
+// channel has no command; it returns the channel used.
+func Send(l *ledger.Ledger, channel, message string) (string, error) {
+	tmpl, used := ChannelCommand(l, channel)
+	if len(tmpl) == 0 {
+		return used, spec.UserError("no %s command for sphere %s: set spheres.%s.actions.%s in %s", used, l.Sphere, l.Sphere, used, config.Path(""))
 	}
 	vars := map[string]string{"{message}": message, "{dossier}": "desk", "{sphere}": l.Sphere, "{title}": "", "{id}": "", "{ref}": "",
 		"{prompt}": message, "{at}": "", "{when}": "", "{kind}": "alert", "{cwd}": ""}
-	argv := make([]string, len(l.Actions.Tell))
-	for k, a := range l.Actions.Tell {
+	argv := make([]string, len(tmpl))
+	for k, a := range tmpl {
 		for v, x := range vars {
 			a = strings.ReplaceAll(a, v, x)
 		}
@@ -273,7 +277,65 @@ func Tell(l *ledger.Ledger, message string) error {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, argv[0], argv[1:]...).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("%s: %v: %s", argv[0], err, strings.TrimSpace(string(out)))
+		return used, fmt.Errorf("%s: %v: %s", argv[0], err, strings.TrimSpace(string(out)))
 	}
-	return nil
+	return used, nil
+}
+
+// Channels to the owner, by the attention a message needs.
+const (
+	Mail = "mail" // can wait
+	Tell = "tell" // needs attention now
+	Push = "push" // urgent
+)
+
+var Channels = []string{Mail, Tell, Push}
+
+// ChannelCommand is the command of a channel, falling back to tell.
+func ChannelCommand(l *ledger.Ledger, channel string) ([]string, string) {
+	switch channel {
+	case Mail:
+		if len(l.Actions.Mail) > 0 {
+			return l.Actions.Mail, Mail
+		}
+	case Push:
+		if len(l.Actions.Push) > 0 {
+			return l.Actions.Push, Push
+		}
+	}
+	return l.Actions.Tell, Tell
+}
+
+// NoticeChannel: a notice a week ahead or more can wait, a closer one needs attention.
+func NoticeChannel(delay string) string {
+	if d, err := when.ParseDuration(delay); err == nil && d >= 7*24*time.Hour {
+		return Mail
+	}
+	return Tell
+}
+
+// EntryChannel is the channel of an instant of an entry: its own --via, else
+// by the notice's delay; the term on tell, or push when the entry is critical.
+func EntryChannel(l *ledger.Ledger, e *ledger.Entry, i ledger.Instant) string {
+	if e.Via != "" {
+		return e.Via
+	}
+	if kind, ok := strings.CutPrefix(i.Kind, "notice "); ok {
+		return NoticeChannel(strings.TrimSuffix(kind, " (by hand)"))
+	}
+	if strings.HasPrefix(i.Kind, "notice") {
+		return Tell
+	}
+	if l.Threshold > 0 {
+		m := e.Moment()
+		at := m.Time(l.Loc(), "00:00")
+		if !m.AllDay {
+			at = m.Time(l.Loc(), l.Clock)
+		}
+		it := connect.Item{Sphere: l.Sphere, Source: "due", ID: e.ID, Title: e.Title, At: at}
+		if v, ok := judge.Load().Get(it); ok && v.Critical >= l.Threshold {
+			return Push
+		}
+	}
+	return Tell
 }

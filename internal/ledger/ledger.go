@@ -30,6 +30,8 @@ const (
 
 var Dos = []string{"tell", "agent", "command"}
 
+var Vias = []string{"mail", "tell", "push"}
+
 type LogEntry struct {
 	At   string `yaml:"at" json:"at"`
 	By   string `yaml:"by" json:"by"`
@@ -51,6 +53,7 @@ type Entry struct {
 	At      string     `yaml:"at" json:"at"` // 2026-11-15 or 2026-11-15T14:00
 	Notice  []string   `yaml:"notice,omitempty" json:"notice,omitempty"`
 	Do      string     `yaml:"do,omitempty" json:"do,omitempty"`
+	Via     string     `yaml:"via,omitempty" json:"via,omitempty"` // mail, tell, push; empty: by attention
 	Run     string     `yaml:"run,omitempty" json:"run,omitempty"`
 	Cwd     string     `yaml:"cwd,omitempty" json:"cwd,omitempty"`
 	Ref     string     `yaml:"ref,omitempty" json:"ref,omitempty"`
@@ -104,15 +107,17 @@ func (e *Entry) HasFired(i Instant) bool {
 }
 
 type Ledger struct {
-	Sphere  string
-	Prefix  string // ids are <Prefix>E-0001
-	Root    string
-	VCS     string
-	By      string
-	Clock   string // default time of a date alone
-	Actions config.Actions
-	Now     func() time.Time
-	Warn    func(string)
+	Sphere string
+	Prefix string // ids are <Prefix>E-0001
+	Root   string
+	VCS    string
+	By     string
+	Clock  string // default time of a date alone
+	// Threshold from which the judge's verdict makes an entry critical; 0 ignores it.
+	Threshold float64
+	Actions   config.Actions
+	Now       func() time.Time
+	Warn      func(string)
 }
 
 // OpenLedger opens a configured sphere.

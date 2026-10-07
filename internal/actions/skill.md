@@ -42,6 +42,17 @@ due done 7 --note "<résultat>" --sphere perso
 | `--notice` | each delay tells before the term, even without `--do` |
 | `--do` | `tell` (message to the user), `agent` (body = prompt), `command` (`--run`) |
 | `--ref` | what the entry belongs to, e.g. `office:P-0040` |
+| `--via` | channel: `mail` (can wait), `tell` (Telegram, needs attention), `push` (Pushover, urgent); default by attention |
+
+## Channels
+
+| Message | Channel |
+|---|---|
+| notice 7 days ahead or more, Monday digest | `mail` |
+| notice under 7 days, term of `--do tell`, critical alert | `tell` |
+| critical line on its day or late, term of a critical entry | `push` |
+
+A channel without a command in `actions` falls back to `tell`.
 
 ## Critical lines
 

@@ -107,6 +107,9 @@ func OpenLedger(ctx *spec.Context, cfg *config.Config, sphere string) (*ledger.L
 		return nil, err
 	}
 	l.Now = Now
+	if len(cfg.Judge.Providers) > 0 {
+		l.Threshold = cfg.Judge.Threshold
+	}
 	if ctx != nil {
 		l.Warn = ctx.Warn
 	}
