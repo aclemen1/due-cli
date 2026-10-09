@@ -46,12 +46,12 @@ func Command(l *ledger.Ledger, e *ledger.Entry, i ledger.Instant, now time.Time)
 		prompt = e.Title
 	}
 	dossier := "desk"
-	if d, ok := strings.CutPrefix(e.Ref, "office:"); ok && d != "" {
+	if d := e.Dossier(); d != "" {
 		dossier = d
 	}
 	vars := map[string]string{
 		"{dossier}": dossier,
-		"{id}":      e.ID, "{title}": e.Title, "{sphere}": l.Sphere, "{ref}": e.Ref, "{cwd}": cwd,
+		"{id}":      e.ID, "{title}": e.Title, "{sphere}": l.Sphere, "{ref}": e.FirstRef(), "{cwd}": cwd,
 		"{at}": term.Format(time.RFC3339), "{when}": when.Until(term, now), "{kind}": i.Kind,
 		"{message}": Message(l, e, i, now), "{prompt}": prompt,
 	}

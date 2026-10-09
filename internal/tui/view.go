@@ -333,8 +333,8 @@ func (m *model) entryTail(it connect.Item) string {
 			break
 		}
 	}
-	if d.Ref != "" {
-		parts = append(parts, d.Ref)
+	if r := d.FirstRef(); r != "" {
+		parts = append(parts, r)
 	}
 	return strings.Join(parts, " · ")
 }
@@ -422,8 +422,8 @@ func (m *model) entryDetail(it connect.Item, w int) []string {
 		" " + sKey.Render(e.ID) + "  " + sBold.Render(trunc(e.Title, w-12)),
 		" " + urg.Render(day+" · "+when.Until(d.Term, now)) + sMuted.Render("  ·  "+state+"  ·  ") + sphereTag(d.Sphere),
 	}
-	if e.Ref != "" {
-		out = append(out, " "+sMuted.Render("réf. ")+sText.Render(e.Ref))
+	if len(e.Refs) > 0 {
+		out = append(out, " "+sMuted.Render("réfs ")+sText.Render(strings.Join(e.Refs, ", ")))
 	}
 	out = append(out, m.verdict(it)...)
 	out = append(out, "", " "+sSection.Render("Calendrier"))

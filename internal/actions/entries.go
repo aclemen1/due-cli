@@ -95,7 +95,7 @@ func registerEntries() {
 			{Name: "via", Kind: spec.String, Enum: ledger.Vias, Help: "Channel of the notices and of a tell: mail, tell or push. Default: mail for a notice a week ahead or more, tell closer, push for a critical term."},
 			{Name: "run", Kind: spec.String, Help: "Shell command of --do command."},
 			{Name: "cwd", Kind: spec.String, Help: "Directory of the action. Defaults to the home directory."},
-			{Name: "ref", Kind: spec.String, Help: "What the entry belongs to, e.g. office:P-0040."},
+			{Name: "ref", Kind: spec.StringList, Help: "What the entry belongs to, as <tool>:<id>: office:P-0040, task:PT-0007, contact:JMR; repeatable or comma-separated."},
 			{Name: "body", Kind: spec.String, Help: "Message or prompt; - reads stdin."},
 			writeSphereParam(),
 		},
@@ -132,7 +132,7 @@ func registerEntries() {
 				return nil, spec.UserError("the title is empty")
 			}
 			e := &ledger.Entry{Title: title, At: m.String(), Notice: ns, Do: ctx.Str("do"), Via: ctx.Str("via"), Run: ctx.Str("run"),
-				Cwd: ctx.Str("cwd"), Ref: ctx.Str("ref"), State: ledger.Open, Created: now.Format(time.RFC3339), Body: b}
+				Cwd: ctx.Str("cwd"), Refs: refsOf(ctx), State: ledger.Open, Created: now.Format(time.RFC3339), Body: b}
 			err = l.WriteAs(func() (string, error) {
 				e.ID = l.NextID()
 				l.Note(e, "created")
@@ -204,7 +204,7 @@ func registerEntries() {
 			{Name: "via", Kind: spec.String, Enum: append([]string{"auto"}, ledger.Vias...), Help: "New channel, or auto for the default by attention."},
 			{Name: "run", Kind: spec.String, Help: "New command of --do command."},
 			{Name: "cwd", Kind: spec.String, Help: "New directory of the action."},
-			{Name: "ref", Kind: spec.String, Help: "New ref; empty clears it."},
+			{Name: "ref", Kind: spec.StringList, Help: "New refs, replacing the old ones; none clears them."},
 			{Name: "body", Kind: spec.String, Help: "New message or prompt; - reads stdin."},
 			writeSphereParam(),
 		},
@@ -263,7 +263,7 @@ func registerEntries() {
 					what = append(what, "cwd")
 				}
 				if _, ok := ctx.Args["ref"]; ok {
-					e.Ref = ctx.Str("ref")
+					e.Refs = refsOf(ctx)
 					what = append(what, "ref")
 				}
 				if _, ok := ctx.Args["body"]; ok {
@@ -452,8 +452,8 @@ func textDetail(w io.Writer, v any) {
 	if e.Cwd != "" {
 		fmt.Fprintf(w, "  cwd      %s\n", e.Cwd)
 	}
-	if e.Ref != "" {
-		fmt.Fprintf(w, "  ref      %s\n", e.Ref)
+	if len(e.Refs) > 0 {
+		fmt.Fprintf(w, "  refs     %s\n", strings.Join(e.Refs, ", "))
 	}
 	for _, u := range d.Upcoming {
 		fmt.Fprintf(w, "  next     %s %s (%s)\n", when.Day(u.When), u.When.Format("15:04"), u.Kind)
@@ -479,4 +479,17 @@ func textDetail(w io.Writer, v any) {
 			fmt.Fprintf(w, "  %s  %-10s %s\n", h.At, h.By, h.What)
 		}
 	}
+}
+
+// refsOf reads --ref: repeatable, comma-separated; none clears.
+func refsOf(ctx *spec.Context) []string {
+	var out []string
+	for _, v := range ctx.List("ref") {
+		for _, r := range strings.Split(v, ",") {
+			if r = strings.TrimSpace(r); r != "" && r != "none" && !contains(out, r) {
+				out = append(out, r)
+			}
+		}
+	}
+	return out
 }

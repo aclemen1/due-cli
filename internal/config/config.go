@@ -19,8 +19,22 @@ type Config struct {
 	Spheres     map[string]Sphere `yaml:"spheres"`
 	Judge       Judge             `yaml:"judge,omitempty"`
 	Notes       Notes             `yaml:"notes,omitempty"`
+	Refs        RefSources        `yaml:"refs,omitempty"`
 
 	path string
+}
+
+// RefSources propose refs to cite (contacts, …) to the TUI's completion:
+// Run prints a JSON list; Value and Label name its fields; Prefix makes the ref.
+type RefSources struct {
+	Complete []RefSource `yaml:"complete,omitempty"`
+}
+
+type RefSource struct {
+	Run    []string `yaml:"run"`
+	Prefix string   `yaml:"prefix"`
+	Value  string   `yaml:"value"`
+	Label  string   `yaml:"label,omitempty"`
 }
 
 // Notes are kept by another tool; due lists and adds them by ref (due:<id>).

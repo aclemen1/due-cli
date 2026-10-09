@@ -56,7 +56,8 @@ type Entry struct {
 	Via     string     `yaml:"via,omitempty" json:"via,omitempty"` // mail, tell, push; empty: by attention
 	Run     string     `yaml:"run,omitempty" json:"run,omitempty"`
 	Cwd     string     `yaml:"cwd,omitempty" json:"cwd,omitempty"`
-	Ref     string     `yaml:"ref,omitempty" json:"ref,omitempty"`
+	Refs    []string   `yaml:"refs,omitempty" json:"refs,omitempty"`
+	Ref     string     `yaml:"ref,omitempty" json:"-"` // older single ref, read into Refs
 	State   string     `yaml:"state" json:"state"`
 	Created string     `yaml:"created" json:"created"`
 	Fired   []Firing   `yaml:"fired,omitempty" json:"fired,omitempty"`
@@ -349,5 +350,27 @@ func read(path string) (*Entry, error) {
 	if e.State == "" {
 		e.State = Open
 	}
+	if e.Ref != "" {
+		e.Refs = append([]string{e.Ref}, e.Refs...)
+		e.Ref = ""
+	}
 	return e, nil
+}
+
+// FirstRef is the entry's main ref, or empty.
+func (e *Entry) FirstRef() string {
+	if len(e.Refs) == 0 {
+		return ""
+	}
+	return e.Refs[0]
+}
+
+// Dossier is the office dossier the entry cites first, or empty.
+func (e *Entry) Dossier() string {
+	for _, r := range e.Refs {
+		if d, ok := strings.CutPrefix(r, "office:"); ok && d != "" {
+			return d
+		}
+	}
+	return ""
 }

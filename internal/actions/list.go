@@ -152,7 +152,10 @@ func ItemOf(l *ledger.Ledger, e *ledger.Entry) connect.Item {
 		parts = append([]string{e.State}, parts...)
 	}
 	it := connect.Item{Sphere: l.Sphere, Source: "due", Type: "due", ID: e.ID, Title: e.Title, At: at, AllDay: m.AllDay,
-		Detail: strings.Join(parts, " · "), Ref: e.Ref, State: e.State, Do: e.Do}
+		Detail: strings.Join(parts, " · "), Ref: e.FirstRef(), State: e.State, Do: e.Do}
+	if len(e.Refs) > 1 {
+		it.Refs = e.Refs[1:]
+	}
 	now := l.Now()
 	if e.State == ledger.Open {
 		if m.AllDay {

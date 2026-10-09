@@ -78,3 +78,48 @@ func AddNote(cfg *config.Config, ref, sphere, text string) error {
 	}
 	return nil
 }
+
+// RefItems runs a ref source and returns its refs and labels.
+func RefItems(s config.RefSource) [][2]string {
+	if len(s.Run) == 0 || s.Value == "" {
+		return nil
+	}
+	argv := notesArgv(s.Run, "", "")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, argv[0], argv[1:]...).Output()
+	if err != nil {
+		return nil
+	}
+	var env struct {
+		OK     *bool           `json:"ok"`
+		Result json.RawMessage `json:"result"`
+	}
+	raw := json.RawMessage(out)
+	if json.Unmarshal(out, &env) == nil && env.OK != nil {
+		raw = env.Result
+	}
+	var rows []map[string]any
+	if json.Unmarshal(raw, &rows) != nil {
+		var wrapped struct {
+			Items []map[string]any `json:"items"`
+		}
+		if json.Unmarshal(raw, &wrapped) != nil {
+			return nil
+		}
+		rows = wrapped.Items
+	}
+	var items [][2]string
+	for _, r := range rows {
+		v := fmt.Sprint(r[s.Value])
+		if v == "" || v == "<nil>" {
+			continue
+		}
+		label := ""
+		if s.Label != "" && r[s.Label] != nil {
+			label = fmt.Sprint(r[s.Label])
+		}
+		items = append(items, [2]string{s.Prefix + v, label})
+	}
+	return items
+}

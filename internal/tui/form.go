@@ -48,7 +48,7 @@ func (m *model) openEntryForm(edit *actions.Detail) {
 	do := tuikit.Choice("do", "Au terme", doLabels...).Help("message : vous écrire ; agent : relancer le dossier de la réf. ; commande : lancer une commande")
 	via := tuikit.Choice("via", "Canal", viaLabel...).Help("auto : e-mail si 7 jours ou plus, Telegram plus près, Pushover si critique")
 	run := tuikit.TextArea("run", "Commande").ShowIf("do", "commande")
-	ref := tuikit.Ref("ref", "Réf.", m.refs).Help("ce à quoi l'échéance se rattache : office:P-…, task:PT-…")
+	refs := tuikit.Refs("refs", "Réfs", m.refs).Help("ce que l'échéance cite : office:P-…, task:PT-…, contact:… ; entrée ou virgule ajoute")
 	body := tuikit.TextArea("body", "Message ou prompt")
 	label := "Nouvelle échéance"
 	if edit != nil {
@@ -62,10 +62,10 @@ func (m *model) openEntryForm(edit *actions.Detail) {
 			via.Default(e.Via)
 		}
 		run.Default(e.Run)
-		ref.Default(e.Ref)
+		refs.Default(strings.Join(e.Refs, ","))
 		body.Default(e.Body)
 	}
-	fields = append(fields, title, at, notice, do, via, run, ref, body)
+	fields = append(fields, title, at, notice, do, via, run, refs, body)
 	m.editing = edit
 	m.openModal(label, tuikit.NewForm("entry", fields...).Now(m.now))
 }
@@ -99,10 +99,13 @@ func (m *model) refs(q string) []tuikit.Item {
 			return
 		}
 		seen[value] = true
-		out = append(out, tuikit.Item{Value: value, Label: value + "  " + label})
+		out = append(out, tuikit.Item{Value: value, Label: label})
 	}
 	for _, it := range m.ledger {
 		add("due:"+it.ID, it.Title)
+	}
+	for _, it := range m.extraRefs {
+		add(it.Value, it.Label)
 	}
 	for _, items := range m.conn {
 		for _, it := range items {
@@ -124,7 +127,7 @@ func (m *model) done(msg tuikit.DoneMsg) tea.Cmd {
 	it := m.target
 	switch msg.ID {
 	case "entry":
-		args := map[string]any{"title": v.String("title"), "at": v.String("at"), "ref": v.String("ref"), "body": v.String("body")}
+		args := map[string]any{"title": v.String("title"), "at": v.String("at"), "ref": v.Strings("refs"), "body": v.String("body")}
 		do := doValues[v.String("do")]
 		if do == "command" {
 			args["run"] = v.String("run")
@@ -150,6 +153,9 @@ func (m *model) done(msg tuikit.DoneMsg) tea.Cmd {
 		args["id"], args["sphere"] = e.ID, m.editing.Sphere
 		if ns == "" {
 			ns = "none"
+		}
+		if len(v.Strings("refs")) == 0 {
+			args["ref"] = []string{"none"}
 		}
 		args["notice"] = []string{ns}
 		args["do"] = do
@@ -200,4 +206,23 @@ func (m *model) openConfirm(id string, it connect.Item, question string) {
 func (m *model) openConfirmRm(it connect.Item) {
 	m.target = it
 	m.openModal("Supprimer", tuikit.NewConfirmTyped("rm", "Supprimer définitivement « "+it.Title+" » ? Recopiez son id.", it.ID))
+}
+
+type extraRefsMsg []tuikit.Item
+
+// loadExtraRefs reads the refs proposed by the configuration (contacts, …).
+func (m *model) loadExtraRefs() tea.Cmd {
+	srcs := m.cfg.Refs.Complete
+	if len(srcs) == 0 {
+		return nil
+	}
+	return func() tea.Msg {
+		var out extraRefsMsg
+		for _, s := range srcs {
+			for _, it := range actions.RefItems(s) {
+				out = append(out, tuikit.Item{Value: it[0], Label: it[1]})
+			}
+		}
+		return out
+	}
 }

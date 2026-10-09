@@ -47,7 +47,7 @@ due done 7 --note "<résultat>" --sphere perso
 | `--at` | date alone fires at `default_time` (09:00) |
 | `--notice` | each delay tells before the term, even without `--do` |
 | `--do` | `tell` (message to the user), `agent` (body = prompt), `command` (`--run`) |
-| `--ref` | what the entry belongs to, e.g. `office:P-0040` |
+| `--ref` | what the entry cites, repeatable or comma-separated: `office:P-0040`, `task:PT-0007`, `contact:JMR` |
 | `--via` | channel: `mail` (can wait), `tell` (Telegram, needs attention), `push` (Pushover, urgent); default by attention |
 
 ## Notes
