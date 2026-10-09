@@ -31,6 +31,11 @@ type Notes struct {
 	Dirs []string `yaml:"dirs,omitempty"` // watched by the TUI
 }
 
+type HideCited struct {
+	Run    []string `yaml:"run"`
+	Prefix string   `yaml:"prefix"`
+}
+
 // Judge asks a decision model which lines would cost dearly if forgotten.
 type Judge struct {
 	// Providers are tried in order: the first that answers wins.
@@ -106,6 +111,9 @@ type Connector struct {
 	Frequent     bool     `yaml:"frequent,omitempty"`      // routine: keep minutely and hourly routines
 	Run          []string `yaml:"run,omitempty"`           // command: argv with {from}, {until}, {sphere}
 	PastKinds    []string `yaml:"past_kinds,omitempty"`    // command: past lines kept only for these kinds
+	// HideCited hides the lines another tool cites: Run lists its items (refs[]),
+	// Prefix is the scheme of this connector's refs there (mnemo:).
+	HideCited *HideCited `yaml:"hide_cited,omitempty"`
 }
 
 var (

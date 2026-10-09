@@ -109,9 +109,18 @@ func One(c config.Connector, w Window) ([]Item, error) {
 	if err != nil {
 		return nil, err
 	}
+	cited, err := citedRefs(ctx, c)
+	if err != nil {
+		return nil, err
+	}
 	var kept []Item
 	for _, it := range items {
 		if !w.keep(it.At) {
+			continue
+		}
+		// Only the date itself is hidden (its id, or its id without the occurrence),
+		// never every date of a record that a task merely cites.
+		if base, _, _ := strings.Cut(it.ID, "@"); cited[it.ID] || cited[base] {
 			continue
 		}
 		it.Source, it.Type = c.Name, c.Type
@@ -628,4 +637,51 @@ func taskRefs(id, ref string, refs []string) (string, []string) {
 		return "task:" + id, nil
 	}
 	return refs[0], append(refs[1:], "task:"+id)
+}
+
+func prefixOf(c config.Connector) string {
+	if c.HideCited == nil {
+		return ""
+	}
+	return c.HideCited.Prefix
+}
+
+// citedRefs are the refs of this connector that another tool cites (a task
+// citing a date of the memory), prefix removed; nil without hide_cited.
+func citedRefs(ctx context.Context, c config.Connector) (map[string]bool, error) {
+	h := c.HideCited
+	if h == nil || len(h.Run) == 0 {
+		return nil, nil
+	}
+	argv := make([]string, len(h.Run))
+	for i, a := range h.Run {
+		argv[i] = config.Expand(a)
+	}
+	var raw json.RawMessage
+	if err := run(ctx, &raw, argv[0], argv[1:]...); err != nil {
+		return nil, fmt.Errorf("hide_cited: %v", err)
+	}
+	type cites struct {
+		Ref  string   `json:"ref"`
+		Refs []string `json:"refs"`
+	}
+	var list []cites
+	if json.Unmarshal(raw, &list) != nil {
+		var wrapped struct {
+			Items []cites `json:"items"`
+		}
+		if err := json.Unmarshal(raw, &wrapped); err != nil {
+			return nil, fmt.Errorf("hide_cited: unreadable JSON: %v", err)
+		}
+		list = wrapped.Items
+	}
+	out := map[string]bool{}
+	for _, it := range list {
+		for _, r := range append(it.Refs, it.Ref) {
+			if s, ok := strings.CutPrefix(r, h.Prefix); ok && s != "" {
+				out[s] = true
+			}
+		}
+	}
+	return out, nil
 }

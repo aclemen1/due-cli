@@ -115,3 +115,26 @@ echo '{"ok":true,"result":{"items":[
 		t.Fatalf("got %+v", items)
 	}
 }
+
+func TestHideCitedDates(t *testing.T) {
+	dir := t.TempDir()
+	dates := filepath.Join(dir, "dates")
+	tasks := filepath.Join(dir, "tasks")
+	os.WriteFile(dates, []byte(`#!/bin/sh
+echo '{"ok":true,"result":[
+ {"id":"01A#0@2026-10-15","title":"Délai de réclamation","at":"2026-10-15","ref":"perso/finances/impots.md"},
+ {"id":"01A#1@2026-10-25","title":"Acompte mensuel","at":"2026-10-25","ref":"perso/finances/impots.md"}]}'
+`), 0o755)
+	os.WriteFile(tasks, []byte(`#!/bin/sh
+echo '{"ok":true,"result":{"items":[{"id":"PT-0121","refs":["mnemo:01A#0","mnemo:perso/finances/impots.md","contact:AC"]}]}}'
+`), 0o755)
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.Local)
+	items, err := One(config.Connector{Name: "mnemo", Type: "command", Run: []string{dates},
+		HideCited: &config.HideCited{Run: []string{tasks}, Prefix: "mnemo:"}}, Window{Until: now.AddDate(0, 0, 30), Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Title != "Acompte mensuel" {
+		t.Fatalf("only the cited date is hidden, not its record: %+v", items)
+	}
+}
