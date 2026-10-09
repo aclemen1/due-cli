@@ -3,8 +3,9 @@
 Every date that falls due, in one list, and actions fired at a date. One Go
 binary: CLI, MCP server (`due mcp`) and terminal interface (`due tui`).
 
-- **Ledger**: what no other tool carries (a contract's end, a warranty, a legal
-  delay), one Markdown file each (`~/due/<sphere>/PE-0001.md`), versioned with jj.
+- **Ledger**: dates not to miss that call for no action by themselves (a
+  contract or signature deadline, a notice period, a warranty end; anything to
+  do is a task, in `task`), one Markdown file each (`~/due/<sphere>/PE-0001.md`), versioned with jj.
   due never writes into reminders or calendars. An entry has a date, notices before it (`7d,1d`) and an
   action at the term: `tell`, `agent` or `command`.
 - **Connectors**: dates read live from other tools, never copied: Apple
@@ -19,7 +20,7 @@ binary: CLI, MCP server (`due mcp`) and terminal interface (`due tui`).
 
 ```bash
 due init --sphere perso --root ~/due/perso
-due add "Renouveler le passeport" --at 2026-12-01 --notice 30d,7d --sphere perso
+due add "Expiration du passeport" --at 2026-12-01 --notice 30d,7d --sphere perso
 due ls --until 7d --format text
 due tui
 due launcher install

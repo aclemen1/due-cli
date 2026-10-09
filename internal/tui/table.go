@@ -186,7 +186,7 @@ func (m *model) list(w, h, top int) []string {
 			return []string{"", "  " + sMuted.Render("Aucune ligne critique ici. c montre toutes les lignes.")}
 		case m.ledgerOnly():
 			return []string{"", "  " + sText.Render("Le registre est vide."),
-				"  " + sMuted.Render("Il garde ce qu'aucun autre outil ne porte : fin de contrat, garantie, délai légal."),
+				"  " + sMuted.Render("Il garde les dates à ne pas rater : délai de contrat, de signature, fin de garantie. Ce qui est à faire va dans task."),
 				"  " + sKey.Render("a") + sMuted.Render(" ajoute une échéance · ") + sKey.Render("s") + sMuted.Render(" montre les autres sources")}
 		default:
 			return []string{"", "  " + sMuted.Render("Rien d'échu dans cette fenêtre. H élargit l'horizon.")}

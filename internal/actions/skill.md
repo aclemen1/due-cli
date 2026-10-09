@@ -1,6 +1,6 @@
 ---
 name: due
-description: Every date that falls due for the user, in one list, and actions fired at a date. Use when the user asks what is coming ("qu'est-ce qui arrive cette semaine ?", "mes échéances", "what's due"), wants to be told before a date ("rappelle-moi 7 jours avant"), or wants something done at a date (a prompt to an agent, a command). Lists the ledger of due and, live, reminders, calendars, office waits, routines and oj sittings.
+description: Dates that must not be missed and call for no action by themselves (a contract or signature deadline, a notice period, a warranty end), their notices, and what fires at a date. Use when the user asks what is coming ("qu'est-ce qui arrive cette semaine ?", "mes échéances", "what's due"), wants to be told before a date ("rappelle-moi 7 jours avant"), or wants something done at a date. Something to do is a task: use task, not due. Lists the ledger of due and, live, calendars, office waits, routines, oj sittings, tasks and the dates of the memory.
 ---
 
 # due
@@ -22,8 +22,13 @@ due show PE-0007                               # P: perso, U: pro
 
 ## Write (ledger only)
 
-The ledger holds what no other tool carries: a contract's end, a warranty, a legal delay, a renewal.
-A date already in a reminder, a calendar, office or a routine stays there: check with `due ls --search <mot>` before `due add`.
+| Goes to | What |
+|---|---|
+| `due` | a date not to miss, with no action by itself: contract or signature deadline, notice period, warranty end, renewal, legal delay |
+| `task` | anything to do, the user's or followed with someone: `task add` |
+
+A deadline that calls for an action (cancel before a date) is both: the date in due, the action in task, each citing the other (`due add … --ref task:<id>`, `task add … --ref due:<id>`).
+A date already in a task, a calendar, office or a routine stays there: check with `due ls --search <mot>` before `due add`.
 due never creates a reminder or a calendar event.
 
 ```bash

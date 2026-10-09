@@ -83,8 +83,8 @@ func registerEntries() {
 	entryEffects := []string{"Writes the entry's file in the sphere's ledger and commits it."}
 	spec.Register(&spec.Action{
 		Category: "due", Name: "add", Top: true,
-		Summary: "Add an entry to the ledger: a date, notices before it, and an action at the term.",
-		Discussion: "The ledger holds what no other tool carries (a contract, a warranty, a legal delay): a date already in a reminder, a calendar, office or a routine stays there and is not added. A date alone (2026-11-15) fires at the default time (09:00). Each notice tells at its delay before the term; " +
+		Summary: "Add a date not to miss to the ledger (contract or signature deadline, notice period): notices before it and what fires at the term. Something to do goes to task instead.",
+		Discussion: "The ledger holds dates that must not be missed and call for no action by themselves: a contract or signature deadline, a notice period, a warranty end. Anything to do is a task (task add), not an entry; a deadline that calls for an action keeps its date here and its action in task, linked by --ref task:<id>. A date already in a calendar, office or a routine stays there and is not added. A date alone (2026-11-15) fires at the default time (09:00). Each notice tells at its delay before the term; " +
 			"the term runs the action: tell (a message to Alain), agent (the body as a prompt), command (--run in a shell). " +
 			"Without --do, the entry is only listed and its notices still tell. The launcher (due launcher install) fires them.",
 		Params: []spec.Param{
@@ -101,10 +101,10 @@ func registerEntries() {
 		},
 		Effects: entryEffects,
 		Examples: []string{
-			`due add "Renouveler le contrat de maintenance" --at 2027-03-31 --notice 60d,14d --sphere pro`,
-			`due add "Renouveler le passeport" --at 2026-12-01 --notice 30d,7d --sphere perso`,
-			`due add "Résilier l'abonnement" --at 15.11.2026 --notice 7d,1d --do tell --sphere perso`,
-			`due add "Relancer la gérance" --at 2026-10-20 --do agent --cwd ~/offices/perso/0007-x --body "Relance la gérance si rien n'est arrivé." --sphere perso`,
+			`due add "Fin du contrat de maintenance" --at 2027-03-31 --notice 60d,14d --ref task:UT-0007 --sphere pro`,
+			`due add "Expiration du passeport" --at 2026-12-01 --notice 30d,7d --sphere perso`,
+			`due add "Délai de résiliation de l'abonnement" --at 15.11.2026 --notice 7d,1d --do tell --sphere perso`,
+			`due add "Fin du délai de réponse de la gérance" --at 2026-10-20 --do agent --ref office:P-0007 --body "Le délai est échu : dis à Alain si la réponse est arrivée." --sphere perso`,
 		},
 		Run: func(ctx *spec.Context) (any, error) {
 			_, l, err := Open(ctx)
