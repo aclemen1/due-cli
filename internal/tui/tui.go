@@ -48,7 +48,18 @@ func init() {
 				defer w.Close()
 			}
 			m.restore()
+			m.bin, _ = ownBinary()
+			m.signals = startSignals()
+			if s := reloadedStatus(); s != "" {
+				m.setStatus(s, false)
+			}
 			_, err = tea.NewProgram(m).Run()
+			if err == nil && m.reloading {
+				if m.watcher != nil {
+					m.watcher.Close()
+				}
+				return spec.Streamed{}, execAgain(m.bin.path)
+			}
 			return spec.Streamed{}, err
 		},
 	})
@@ -116,7 +127,13 @@ type model struct {
 	statusErr bool
 	statusAt  time.Time
 	saved     []byte // the state last written
-	spin      int
+
+	// reload after a rebuild or SIGUSR1, once at rest
+	bin          binStamp
+	signals      chan os.Signal
+	reloadWanted bool
+	reloading    bool
+	spin         int
 
 	// geometry of the last frame, for the mouse
 	listY, listH, listW, tabsY int
@@ -191,7 +208,10 @@ func (m *model) ctx(args map[string]any) *spec.Context {
 }
 
 func (m *model) Init() tea.Cmd {
-	cmds := []tea.Cmd{tea.RequestBackgroundColor, m.loadLedger(), m.loadAll(), tick(), poll()}
+	cmds := []tea.Cmd{tea.RequestBackgroundColor, m.loadLedger(), m.loadAll(), tick(), poll(), checkBin()}
+	if m.signals != nil {
+		cmds = append(cmds, waitSignal(m.signals))
+	}
 	if m.watcher != nil {
 		cmds = append(cmds, waitWatch(m.watcher))
 	}
@@ -242,7 +262,18 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.BackgroundColorMsg:
 		darkBackground = msg.IsDark()
+	case binCheckMsg:
+		return m, m.onBinCheck()
+	case signalMsg:
+		m.reloadWanted = true
+		if cmd := m.maybeReload(); cmd != nil {
+			return m, cmd
+		}
+		return m, waitSignal(m.signals)
 	case tickMsg:
+		if cmd := m.maybeReload(); cmd != nil {
+			return m, cmd
+		}
 		m.spin++
 		if m.status != "" && !m.statusErr && m.now().Sub(m.statusAt) > statusLife {
 			m.status = ""

@@ -120,6 +120,10 @@ func (m *model) header(w int) []string {
 	if n := len(m.connErr); n > 0 {
 		right = sErr.Render(fmt.Sprintf("%d source(s) en erreur", n)) + sMuted.Render(" · ") + right
 	}
+	if m.reloadWanted {
+		right = sWarn.Render("nouvelle version") + sMuted.Render(" · ") + right
+	}
+	right += sMuted.Render(" · " + Build())
 	gap := w - ansi.StringWidth(left) - ansi.StringWidth(right)
 	line1 := left + strings.Repeat(" ", max(1, gap)) + right
 
