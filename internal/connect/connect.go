@@ -516,13 +516,14 @@ func command(ctx context.Context, c config.Connector, w Window) ([]Item, error) 
 		return nil, err
 	}
 	type line struct {
-		ID     string `json:"id"`
-		Title  string `json:"title"`
-		At     string `json:"at"`
-		AllDay bool   `json:"all_day"`
-		Detail string `json:"detail"`
-		Ref    string `json:"ref"`
-		Kind   string `json:"kind"`
+		ID     string   `json:"id"`
+		Title  string   `json:"title"`
+		At     string   `json:"at"`
+		AllDay bool     `json:"all_day"`
+		Detail string   `json:"detail"`
+		Ref    string   `json:"ref"`
+		Refs   []string `json:"refs"`
+		Kind   string   `json:"kind"`
 	}
 	var lines []line
 	if err := json.Unmarshal(raw, &lines); err != nil {
@@ -555,7 +556,7 @@ func command(ctx context.Context, c config.Connector, w Window) ([]Item, error) 
 		} else if l.Kind != "" {
 			detail = kindLabel(l.Kind)
 		}
-		out = append(out, Item{ID: l.ID, Title: l.Title, At: t, AllDay: allDay, Detail: detail, Ref: l.Ref})
+		out = append(out, Item{ID: l.ID, Title: l.Title, At: t, AllDay: allDay, Detail: detail, Ref: l.Ref, Refs: l.Refs})
 	}
 	return out, nil
 }
