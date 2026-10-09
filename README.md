@@ -9,7 +9,7 @@ binary: CLI, MCP server (`due mcp`) and terminal interface (`due tui`).
   action at the term: `tell`, `agent` or `command`.
 - **Connectors**: dates read live from other tools, never copied: Apple
   Reminders and Calendar (`macos`), office waits, routine runs, oj sittings and
-  actions, and any command printing JSON.
+  actions, dated tasks of `task`, and any command printing JSON.
 - **Launcher**: the launch agent `aero.clement.due` runs `due tick` every
   minute. Missed instants fire once, the latest only.
 - **Spheres** (perso, pro) file things, they do not hide them: reads cover every
@@ -43,11 +43,12 @@ spheres:
       push: ["office", "tell", "{dossier}", "--office", "~/offices/perso", "--source", "pushover", "--text", "{message}"] # urgent
       agent: ["office", "notify", "desk", "{dossier}", "--office", "~/offices/perso", "--text", "{prompt}"]
     connectors:
-      - {name: rappels, type: reminders, exclude_tags: [pro]}
+      - {name: rappels, type: reminders, exclude_tags: [pro], exclude_lists: [task]}
       - {name: agenda, type: calendar, calendars: ["Agenda Privé"]}
       - {name: office, type: office, office: ~/offices/perso}
       - {name: routine, type: routine, owners: ["office:perso", "-"]}
       - {name: oj, type: oj, oj_sphere: perso}
+      - {name: task, type: task, task_sphere: perso}  # dated tasks; oj: sittings_only once oj hands its actions to task
       - {name: mnemo, type: command, run: ["my-dates", "--until", "{until}"]}
 ```
 

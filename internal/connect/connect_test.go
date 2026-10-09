@@ -91,3 +91,25 @@ echo '{"ok":true,"result":[{"id":"P-0007","title":"Sinistre","waiting_on":"AXA",
 		t.Fatalf("got %+v", items)
 	}
 }
+
+func TestTaskConnector(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "task")
+	body := `#!/bin/sh
+echo '{"ok":true,"result":{"items":[
+ {"id":"UT-0001","title":"Propositions d économies","who":"Alain","due":"2026-10-09","state":"open","mine":true},
+ {"id":"UT-0002","title":"Offre Camptocamp","who":"Marc","due":"2026-10-12T14:00","state":"waiting","waiting_on":"Camptocamp","mine":false,"ref":"office:U-0002"},
+ {"id":"UT-0003","title":"Sans date","state":"open","mine":true}],"counts":{}}}'
+`
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.Local)
+	items, err := One(config.Connector{Name: "task", Type: "task", Bin: script}, Window{Until: now.AddDate(0, 0, 30), Now: now, Sphere: "pro"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || !items[0].AllDay || items[0].Ref != "task:UT-0001" || items[1].Detail != "Marc · attend Camptocamp" || items[1].Ref != "office:U-0002" {
+		t.Fatalf("got %+v", items)
+	}
+}

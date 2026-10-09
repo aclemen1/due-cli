@@ -601,6 +601,8 @@ func sourceStyle(it connect.Item) lipgloss.Style {
 		return lipgloss.NewStyle().Foreground(cPro)
 	case "routine", "oj":
 		return lipgloss.NewStyle().Foreground(cWorking)
+	case "task":
+		return lipgloss.NewStyle().Foreground(cReady)
 	}
 	return sMuted
 }

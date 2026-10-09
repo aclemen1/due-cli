@@ -56,6 +56,10 @@ func Roots(s config.Sphere, sphere string) []Root {
 			roots = append(roots,
 				Root{src, filepath.Join(home, ".config", "routine", "tasks"), 2, md},
 				Root{src, filepath.Join(home, ".local", "state", "routine", "tasks"), 2, func(p string) bool { return strings.HasSuffix(p, ".json") }})
+		case "task":
+			if dir := taskRoot(c, sphere); dir != "" {
+				roots = append(roots, Root{src, dir, 0, md})
+			}
 		case "oj":
 			if dir := ojRoot(c, sphere); dir != "" {
 				roots = append(roots, Root{src, dir, 3, func(p string) bool {
@@ -190,3 +194,27 @@ func (w *Watcher) fire(source string) {
 }
 
 func (w *Watcher) Close() error { return w.fs.Close() }
+
+func taskRoot(c config.Connector, sphere string) string {
+	if c.TaskSphere != "" {
+		sphere = c.TaskSphere
+	}
+	p := os.Getenv("TASK_CONFIG")
+	if p == "" {
+		home, _ := os.UserHomeDir()
+		p = filepath.Join(home, ".config", "task", "config.yaml")
+	}
+	b, err := os.ReadFile(config.Expand(p))
+	if err != nil {
+		return ""
+	}
+	var cfg struct {
+		Spheres map[string]struct {
+			Root string `yaml:"root"`
+		} `yaml:"spheres"`
+	}
+	if yaml.Unmarshal(b, &cfg) != nil {
+		return ""
+	}
+	return config.Expand(cfg.Spheres[sphere].Root)
+}

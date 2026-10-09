@@ -82,18 +82,21 @@ type Connector struct {
 	Timeout string `yaml:"timeout,omitempty"` // default 20s
 	Off     bool   `yaml:"off,omitempty"`
 
-	Lists       []string `yaml:"lists,omitempty"`        // reminders: keep these lists
-	Tags        []string `yaml:"tags,omitempty"`         // reminders: keep those with one of these tags
-	ExcludeTags []string `yaml:"exclude_tags,omitempty"` // reminders: drop those with one of these tags
-	Calendars   []string `yaml:"calendars,omitempty"`    // calendar: these calendars
-	Office      string   `yaml:"office,omitempty"`       // office: directory of the office
-	OJSphere    string   `yaml:"oj_sphere,omitempty"`    // oj: its sphere
-	Owners      []string `yaml:"owners,omitempty"`       // routine: owner prefixes kept; "-" keeps routines without owner
-	Include     []string `yaml:"include,omitempty"`      // routine: id globs kept
-	Exclude     []string `yaml:"exclude,omitempty"`      // routine: id globs dropped
-	Frequent    bool     `yaml:"frequent,omitempty"`     // routine: keep minutely and hourly routines
-	Run         []string `yaml:"run,omitempty"`          // command: argv with {from}, {until}, {sphere}
-	PastKinds   []string `yaml:"past_kinds,omitempty"`   // command: past lines kept only for these kinds
+	Lists        []string `yaml:"lists,omitempty"`         // reminders: keep these lists
+	ExcludeLists []string `yaml:"exclude_lists,omitempty"` // reminders: drop these lists
+	Tags         []string `yaml:"tags,omitempty"`          // reminders: keep those with one of these tags
+	ExcludeTags  []string `yaml:"exclude_tags,omitempty"`  // reminders: drop those with one of these tags
+	Calendars    []string `yaml:"calendars,omitempty"`     // calendar: these calendars
+	Office       string   `yaml:"office,omitempty"`        // office: directory of the office
+	OJSphere     string   `yaml:"oj_sphere,omitempty"`     // oj: its sphere
+	SittingsOnly bool     `yaml:"sittings_only,omitempty"` // oj: sittings without the actions (when task carries them)
+	TaskSphere   string   `yaml:"task_sphere,omitempty"`   // task: its sphere, default the connector's
+	Owners       []string `yaml:"owners,omitempty"`        // routine: owner prefixes kept; "-" keeps routines without owner
+	Include      []string `yaml:"include,omitempty"`       // routine: id globs kept
+	Exclude      []string `yaml:"exclude,omitempty"`       // routine: id globs dropped
+	Frequent     bool     `yaml:"frequent,omitempty"`      // routine: keep minutely and hourly routines
+	Run          []string `yaml:"run,omitempty"`           // command: argv with {from}, {until}, {sphere}
+	PastKinds    []string `yaml:"past_kinds,omitempty"`    // command: past lines kept only for these kinds
 }
 
 var (
@@ -101,7 +104,7 @@ var (
 	prefixRe   = regexp.MustCompile(`^[A-Z]{1,3}$`)
 )
 
-var Types = []string{"reminders", "calendar", "office", "routine", "oj", "command"}
+var Types = []string{"reminders", "calendar", "office", "routine", "oj", "task", "command"}
 
 // Path resolves the configuration file: the flag, then DUE_CONFIG, then
 // ~/.config/due/config.yaml.

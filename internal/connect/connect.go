@@ -97,6 +97,8 @@ func One(c config.Connector, w Window) ([]Item, error) {
 		items, err = routine(ctx, c, w)
 	case "oj":
 		items, err = oj(ctx, c, w)
+	case "task":
+		items, err = task(ctx, c, w)
 	case "command":
 		items, err = command(ctx, c, w)
 	default:
@@ -237,6 +239,9 @@ func reminders(ctx context.Context, c config.Connector, w Window) ([]Item, error
 	var out []Item
 	for _, r := range res.Items {
 		if r.Due == "" || (len(c.Lists) > 0 && !containsFold(c.Lists, r.List)) {
+			continue
+		}
+		if containsFold(c.ExcludeLists, r.List) {
 			continue
 		}
 		if (len(c.Tags) > 0 && !anyFold(c.Tags, r.Tags)) || anyFold(c.ExcludeTags, r.Tags) {
@@ -441,6 +446,9 @@ func oj(ctx context.Context, c config.Connector, w Window) ([]Item, error) {
 		}
 		out = append(out, Item{ID: s.ID, Title: "Séance " + s.Meeting, At: t, AllDay: allDay, Detail: detail, Ref: "oj:" + s.ID})
 	}
+	if c.SittingsOnly {
+		return out, nil
+	}
 	var actions []struct {
 		Item  string `json:"item"`
 		Title string `json:"title"`
@@ -540,4 +548,51 @@ func kindLabel(k string) string {
 		return l
 	}
 	return k
+}
+
+// task reads the dated tasks of the task tool: the owner's and those followed.
+func task(ctx context.Context, c config.Connector, w Window) ([]Item, error) {
+	sphere := c.TaskSphere
+	if sphere == "" {
+		sphere = w.Sphere
+	}
+	var res struct {
+		Items []struct {
+			ID        string `json:"id"`
+			Title     string `json:"title"`
+			Who       string `json:"who"`
+			Due       string `json:"due"`
+			State     string `json:"state"`
+			WaitingOn string `json:"waiting_on"`
+			Mine      bool   `json:"mine"`
+			Ref       string `json:"ref"`
+		} `json:"items"`
+	}
+	if err := run(ctx, &res, bin(c, "task"), "ls", "--format", "json", "--sphere", sphere); err != nil {
+		return nil, err
+	}
+	loc := w.Now.Location()
+	var out []Item
+	for _, t := range res.Items {
+		at, ok := parseTime(t.Due, loc)
+		if t.Due == "" || !ok {
+			continue
+		}
+		var parts []string
+		if !t.Mine && t.Who != "" {
+			parts = append(parts, t.Who)
+		}
+		if t.WaitingOn != "" {
+			parts = append(parts, "attend "+t.WaitingOn)
+		}
+		if t.State == "proposed" {
+			parts = append(parts, "proposée")
+		}
+		ref := t.Ref
+		if ref == "" {
+			ref = "task:" + t.ID
+		}
+		out = append(out, Item{ID: t.ID, Title: t.Title, At: at, AllDay: isDate(t.Due), Detail: strings.Join(parts, " · "), Ref: ref})
+	}
+	return out, nil
 }

@@ -17,7 +17,7 @@ due ls --source due --all                      # the ledgers only, done included
 due show PE-0007                               # P: perso, U: pro
 ```
 
-- A line from a connector (`source` ≠ `due`) belongs to its tool: change it there (macos, office, routine, oj).
+- A line from a connector (`source` ≠ `due`) belongs to its tool: change it there (macos, office, routine, oj, task: `task edit|done`).
 - `!` marks a late line. `errors` lists connectors that failed.
 
 ## Write (ledger only)
