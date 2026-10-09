@@ -4,8 +4,10 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -25,10 +27,13 @@ import (
 func init() {
 	spec.Register(&spec.Action{
 		Category: "setup", Name: "tui", Top: true,
-		Summary:  "Open the terminal interface: the ledgers, every source, the detail of a line, a form to add and edit.",
-		Params:   []spec.Param{{Name: "sphere", Kind: spec.String, Help: "Show only this sphere. Defaults to $DUE_SPHERE, else every sphere."}},
+		Summary: "Open the terminal interface: the ledgers, every source, the detail of a line, a form to add and edit.",
+		Params: []spec.Param{
+			{Name: "sphere", Kind: spec.String, Help: "Show only this sphere. Defaults to $DUE_SPHERE, else every sphere."},
+			{Name: "select", Kind: spec.String, Help: "Open on this line, selected and visible: an entry (PE-0003) or a line of a connector (01M44DR8KNBNK912RHEY2FBQS3#0). The TUI moves to the view that holds it; an unknown id opens it as usual, with a message."},
+		},
 		Effects:  []string{"Runs until q; every change goes through the same actions as the CLI."},
-		Examples: []string{"due tui", "due tui --sphere pro"},
+		Examples: []string{"due tui", "due tui --sphere pro", "due tui --select PE-0003"},
 		Run: func(ctx *spec.Context) (any, error) {
 			cfg, err := config.Load(ctx.Config)
 			if err != nil {
@@ -65,6 +70,7 @@ func init() {
 				}
 			}
 			m.restore()
+			m.pendingSelect = strings.TrimSpace(ctx.Str("select"))
 			m.bin, _ = ownBinary()
 			m.signals = startSignals()
 			if s := reloadedStatus(); s != "" {
@@ -110,17 +116,18 @@ type model struct {
 	macosOn bool         // macos watch is live: no polling of those sources
 
 	// what is shown
-	source     int // index in views(): 0 the ledger, 1 everything, then each connector
-	horizon    int
-	filter     string
-	showDone   bool
-	critOnly   bool
-	sphereOnly string // one sphere among those shown, or all
-	sortBy     int    // index in sorts
-	sortRev    bool
-	pendingG   bool // g pressed once: gg goes to the top
-	detailOn   bool
-	helpOn     bool
+	source        int // index in views(): 0 the ledger, 1 everything, then each connector
+	horizon       int
+	filter        string
+	showDone      bool
+	critOnly      bool
+	sphereOnly    string // one sphere among those shown, or all
+	sortBy        int    // index in sorts
+	sortRev       bool
+	pendingG      bool   // g pressed once: gg goes to the top
+	pendingSelect string // --select: the line to open on, once it is read
+	detailOn      bool
+	helpOn        bool
 
 	// data
 	ledger    []connect.Item
@@ -356,7 +363,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.ledger, m.details, m.acks, m.loadedAt, m.ready = msg.items, msg.details, msg.acks, m.now(), true
 		m.apply()
-		return m, m.loadNotes()
+		return m, tea.Batch(m.loadNotes(), m.trySelect())
 	case extraRefsMsg:
 		m.extraRefs = msg
 	case notesMsg:
@@ -375,6 +382,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.loadedAt = m.now()
 		m.apply()
+		return m, m.trySelect()
 	case doneMsg:
 		if msg.err != nil {
 			m.setStatus(msg.err.Error(), true)
@@ -758,3 +766,60 @@ func contains(l []string, s string) bool {
 	}
 	return false
 }
+
+// trySelect opens on the line of --select once the data holding it is read:
+// the ledger, or everything for a line of a connector (widening the horizon
+// once if needed).
+func (m *model) trySelect() tea.Cmd {
+	id := m.pendingSelect
+	if id == "" || !m.ready {
+		return nil
+	}
+	// An entry id may come short, as the CLI takes it: pe-7 is PE-0007.
+	if g := shortID.FindStringSubmatch(strings.ToUpper(id)); g != nil {
+		n, _ := strconv.Atoi(g[2])
+		id = fmt.Sprintf("%sE-%04d", g[1], n)
+	}
+	match := func(it connect.Item) bool {
+		return strings.EqualFold(it.ID, id) || strings.EqualFold(ledger.BaseID(it.ID), id)
+	}
+	pick := func(it connect.Item, view int) tea.Cmd {
+		m.pendingSelect = ""
+		m.source, m.filter, m.critOnly, m.sphereOnly = view, "", false, ""
+		if it.State != "" && it.State != ledger.Open {
+			m.showDone = true
+		}
+		if it.Type != "due" && m.acks[it.Sphere+"\x00"+ledger.AckKey(it.Source, it.ID, it.At.Format(time.RFC3339))] {
+			m.showDone = true
+		}
+		m.selKey, m.top = key(it), 0
+		m.apply()
+		m.selectIndex(m.sel)
+		m.detailOn = true
+		return nil
+	}
+	for _, it := range m.ledger {
+		if match(it) {
+			return pick(it, 0)
+		}
+	}
+	for _, items := range m.conn {
+		for _, it := range items {
+			if match(it) {
+				return pick(it, 1)
+			}
+		}
+	}
+	if m.busy() {
+		return nil
+	}
+	if m.horizon < len(horizons)-1 && len(m.connectors()) > 0 {
+		m.horizon = len(horizons) - 1
+		return m.loadAll()
+	}
+	m.pendingSelect = ""
+	m.setStatus("--select : "+id+" introuvable dans le registre et les sources", true)
+	return nil
+}
+
+var shortID = regexp.MustCompile(`^([A-Z]{1,3})E-0*(\d+)$`)

@@ -404,3 +404,23 @@ func pressAdd(t *testing.T, m *model) {
 	t.Helper()
 	add(t, m, "Fin du bail", "31.10.2026", "")
 }
+
+func TestSelectOpensOnTheLine(t *testing.T) {
+	m := setup(t)
+	add(t, m, "Garantie", "01.03.2027", "")
+	add(t, m, "Bail", "31.10.2026", "")
+	again := newModel(m.cfgPath, m.cfg, m.spheres)
+	again.w, again.h = 130, 32
+	again.pendingSelect = "pe-1"
+	drive(t, again, again.loadLedger())
+	if it, ok := again.current(); !ok || it.ID != "PE-0001" || !again.detailOn {
+		t.Fatalf("--select opens on PE-0001, got %+v", it)
+	}
+	unknown := newModel(m.cfgPath, m.cfg, m.spheres)
+	unknown.w, unknown.h = 130, 32
+	unknown.pendingSelect = "XX-9"
+	drive(t, unknown, unknown.loadLedger())
+	if unknown.pendingSelect != "" || !strings.Contains(screen(unknown), "introuvable") {
+		t.Fatalf("an unknown id gives a message:\n%s", screen(unknown))
+	}
+}
