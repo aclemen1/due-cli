@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/aclemen1/tuikit"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/aclemen1/due-cli/internal/connect"
@@ -38,9 +39,6 @@ func (m *model) render() string {
 
 	var body []string
 	switch {
-	case m.form != nil:
-		body = m.form.view(w, bodyH)
-		m.listH, m.rowItem = 0, nil
 	case m.helpOn:
 		body = m.help(w)
 		m.listH, m.rowItem = 0, nil
@@ -52,7 +50,11 @@ func (m *model) render() string {
 		lines = append(lines, "")
 	}
 	lines = append(lines[:h-2], sep, foot)
-	return block(lines, w, h)
+	out := block(lines, w, h)
+	if m.modal.Open() {
+		return tuikit.Overlay(out, m.modal, w, h)
+	}
+	return out
 }
 
 // panes lays out the list and the detail: side by side when wide, stacked
@@ -200,8 +202,7 @@ func (m *model) badge(view int) string {
 
 func (m *model) footer(w int) string {
 	if m.prompt != pNone {
-		label := map[prompt]string{pFilter: "chercher", pSnooze: "reporter de", pConfirmDrop: "abandonner ?",
-			pConfirmRun: "exécuter ?", pConfirmRm: "supprimer ?"}[m.prompt]
+		label := map[prompt]string{pFilter: "filtrer"}[m.prompt]
 		return sKey.Render(label+" › ") + m.input.View()
 	}
 	if m.status != "" {
@@ -209,9 +210,6 @@ func (m *model) footer(w int) string {
 			return sErr.Render("✗ " + m.status)
 		}
 		return sOK.Render("✓ " + m.status)
-	}
-	if m.form != nil {
-		return m.form.footer()
 	}
 	if m.helpOn {
 		return helpLine("esc", "fermer l'aide", "q", "quitter")

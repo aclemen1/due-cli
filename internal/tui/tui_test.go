@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/aclemen1/tuikit"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/aclemen1/due-cli/internal/actions"
@@ -35,7 +36,7 @@ func drive(t *testing.T, m *model, cmd tea.Cmd) {
 		for _, c := range msg {
 			drive(t, m, c)
 		}
-	case ledgerMsg, connMsg, doneMsg:
+	case ledgerMsg, connMsg, doneMsg, tuikit.DoneMsg, tuikit.CancelMsg:
 		_, next := m.Update(msg)
 		drive(t, m, next)
 	}
@@ -51,6 +52,12 @@ func keyOf(s string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeyTab}
 	case "ctrl+s":
 		return tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}
+	case "right":
+		return tea.KeyPressMsg{Code: tea.KeyRight}
+	case "shift+tab":
+		return tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
+	case "space":
+		return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
 	}
 	return tea.KeyPressMsg{Code: []rune(s)[0], Text: s}
 }
@@ -58,7 +65,7 @@ func keyOf(s string) tea.KeyPressMsg {
 func press(t *testing.T, m *model, s string) tea.Cmd {
 	t.Helper()
 	_, cmd := m.Update(keyOf(s))
-	if s == "q" && m.form == nil && m.prompt == pNone {
+	if s == "q" && !m.modal.Open() && m.prompt == pNone {
 		return cmd
 	}
 	drive(t, m, cmd)
@@ -107,8 +114,8 @@ func add(t *testing.T, m *model, title, at, notice string) {
 	press(t, m, "tab")
 	typeText(t, m, notice)
 	press(t, m, "ctrl+s")
-	if m.form != nil {
-		t.Fatalf("form still open: %s\n%s", m.form.err, screen(m))
+	if m.modal.Open() {
+		t.Fatalf("form still open:\n%s", screen(m))
 	}
 }
 
@@ -126,7 +133,7 @@ func TestEmptyLedgerThenFormAndDetail(t *testing.T) {
 	}
 	press(t, m, "tab")
 	typeText(t, m, "7d,1d")
-	if s := screen(m); !strings.Contains(s, "→ message les 08.10 09:00 · 14.10 09:00") {
+	if s := screen(m); !strings.Contains(s, "→ 7d jeu. 08.10.2026 · 1d mer. 14.10.2026") {
 		t.Fatalf("live notices:\n%s", s)
 	}
 	press(t, m, "ctrl+s")
@@ -142,8 +149,8 @@ func TestFormEditsTheEntry(t *testing.T) {
 	m := setup(t)
 	add(t, m, "Passeport", "01.12.2026", "30d")
 	press(t, m, "E")
-	if m.form == nil || m.form.val("title") != "Passeport" || m.form.val("notice") != "30d" {
-		t.Fatal("E opens the form filled in")
+	if s := screen(m); !m.modal.Open() || !strings.Contains(s, "Modifier PE-0001") || !strings.Contains(s, "30d") {
+		t.Fatalf("E opens the form filled in:\n%s", s)
 	}
 	typeText(t, m, " d'Eve")
 	press(t, m, "ctrl+s")
@@ -190,10 +197,15 @@ func TestQ(t *testing.T) {
 	press(t, m, "esc")
 	press(t, m, "a")
 	press(t, m, "q")
-	if m.form == nil || m.form.val("title") != "q" {
-		t.Fatal("q is typed in the form")
+	if !m.modal.Open() {
+		t.Fatal("q is typed in the form, which stays open")
 	}
 	press(t, m, "esc")
+	press(t, m, "o")
+	press(t, m, "enter")
+	if m.modal.Open() {
+		t.Fatalf("esc then Oui closes the form:\n%s", screen(m))
+	}
 	if cmd := press(t, m, "q"); cmd == nil {
 		t.Fatal("q quits")
 	}
@@ -240,7 +252,7 @@ func TestTwoSpheresAndTheFormAsksWhich(t *testing.T) {
 	drive(t, m, m.loadLedger())
 
 	press(t, m, "a")
-	if s := screen(m); !strings.Contains(s, "Sphère") || !strings.Contains(s, "à choisir") {
+	if s := screen(m); !strings.Contains(s, "Sphère *") || !strings.Contains(s, "( ) perso   ( ) pro") {
 		t.Fatalf("the form asks for the sphere:\n%s", s)
 	}
 	press(t, m, "tab")
@@ -248,14 +260,17 @@ func TestTwoSpheresAndTheFormAsksWhich(t *testing.T) {
 	press(t, m, "tab")
 	typeText(t, m, "31.03.2027")
 	press(t, m, "ctrl+s")
-	if m.form == nil || !strings.Contains(m.form.err, "sphère") {
+	if !m.modal.Open() {
 		t.Fatal("no default sphere: saving without one is refused")
 	}
-	press(t, m, "l")
-	press(t, m, "l")
+	for m.modal.Open() && !strings.Contains(screen(m), "› Sphère") {
+		press(t, m, "shift+tab")
+	}
+	press(t, m, "right")
+	press(t, m, "right")
 	press(t, m, "ctrl+s")
-	if m.form != nil {
-		t.Fatalf("form still open: %s", m.form.err)
+	if m.modal.Open() {
+		t.Fatalf("form still open:\n%s", screen(m))
 	}
 	s := screen(m)
 	if !strings.Contains(s, "UE-0001") || !strings.Contains(s, "perso + pro") || !strings.Contains(s, "U  ") {
@@ -317,7 +332,7 @@ func TestStateSurvivesARestart(t *testing.T) {
 func TestConventionKeys(t *testing.T) {
 	m := setup(t)
 	press(t, m, "c")
-	if m.form == nil {
+	if !m.modal.Open() {
 		t.Fatal("c opens a new entry")
 	}
 	press(t, m, "esc")
@@ -343,12 +358,12 @@ func TestConventionKeys(t *testing.T) {
 	}
 	press(t, m, "h")
 	press(t, m, "x")
-	if m.prompt != pConfirmDrop {
+	if !m.modal.Open() || !strings.Contains(screen(m), "Abandonner") {
 		t.Fatal("x asks before dropping")
 	}
 	press(t, m, "esc")
 	press(t, m, "#")
-	if m.prompt != pConfirmRm {
-		t.Fatal("# asks before deleting")
+	if !m.modal.Open() || !strings.Contains(screen(m), "Recopiez") {
+		t.Fatalf("# asks for the id before deleting:\n%s", screen(m))
 	}
 }

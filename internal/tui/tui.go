@@ -13,13 +13,13 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"github.com/aclemen1/tuikit"
 
 	"github.com/aclemen1/due-cli/internal/actions"
 	"github.com/aclemen1/due-cli/internal/config"
 	"github.com/aclemen1/due-cli/internal/connect"
 	"github.com/aclemen1/due-cli/internal/spec"
 	"github.com/aclemen1/due-cli/internal/watch"
-	"github.com/aclemen1/due-cli/internal/when"
 )
 
 func init() {
@@ -87,10 +87,6 @@ type prompt int
 const (
 	pNone prompt = iota
 	pFilter
-	pSnooze
-	pConfirmDrop
-	pConfirmRun
-	pConfirmRm
 )
 
 var horizons = []string{"7d", "30d", "90d", "365d"}
@@ -141,9 +137,11 @@ type model struct {
 	scroll  int
 	rowItem []int // for each list row on screen: the item index, or -1
 
-	prompt prompt
-	input  textinput.Model
-	form   *form
+	prompt  prompt
+	input   textinput.Model
+	modal   *tuikit.Modal   // the open input, if any: it takes every key
+	editing *actions.Detail // the entry the form edits; nil adds one
+	target  connect.Item    // the line a snooze or a confirmation is about
 
 	w, h      int
 	status    string
@@ -279,15 +277,30 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// An open modal takes every key, paste and click: no shortcut of the TUI fires.
+	if m.modal.Open() {
+		switch msg.(type) {
+		case tickMsg, pollMsg, watchMsg, ledgerMsg, connMsg, doneMsg, macosMsg, binCheckMsg, signalMsg,
+			tuikit.DoneMsg, tuikit.CancelMsg, tea.BackgroundColorMsg, tea.WindowSizeMsg:
+		default:
+			return m, m.modal.Update(msg)
+		}
+	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
 		m.input.SetWidth(max(10, m.w-30))
-		if m.form != nil {
-			m.form.resize(m.w)
+		if m.modal.Open() {
+			return m, m.modal.Update(msg)
 		}
 	case tea.BackgroundColorMsg:
 		darkBackground = msg.IsDark()
+		tuikit.SetDarkBackground(msg.IsDark())
+	case tuikit.DoneMsg:
+		m.modal = nil
+		return m, m.done(msg)
+	case tuikit.CancelMsg:
+		m.modal = nil
 	case macosMsg:
 		return m, m.onMacos(watch.MacosEvent(msg))
 	case binCheckMsg:
@@ -361,15 +374,12 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.loadLedger()
 	case tea.MouseMsg:
-		if m.form == nil && m.prompt == pNone {
+		if !m.modal.Open() && m.prompt == pNone {
 			return m, m.mouse(msg)
 		}
 	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
-		}
-		if m.form != nil {
-			return m, m.keyForm(msg)
 		}
 		if m.prompt != pNone {
 			return m, m.keyPrompt(msg)
@@ -493,8 +503,7 @@ func (m *model) keyList(k tea.KeyPressMsg) tea.Cmd {
 		m.setStatus("relecture de toutes les sources", false)
 		return tea.Batch(m.loadLedger(), m.loadAll())
 	case "c", "a":
-		m.form = newForm(m, nil)
-		return m.form.focus()
+		m.openEntryForm(nil)
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		n, _ := strconv.Atoi(s)
 		if n <= len(m.views()) {
@@ -542,17 +551,16 @@ func (m *model) keyEntry(key string) tea.Cmd {
 		}
 		return m.act("done", ids, it.ID+" faite")
 	case "x":
-		return m.ask(pConfirmDrop, "o pour abandonner « "+it.Title+" »", "")
+		m.openConfirm("drop", it, "Abandonner « "+it.Title+" » ?")
 	case "#", "D":
-		return m.ask(pConfirmRm, "o pour supprimer définitivement « "+it.Title+" »", "")
+		m.openConfirmRm(it)
 	case "R":
-		return m.ask(pConfirmRun, "o pour exécuter maintenant l'action de « "+it.Title+" »", "")
+		m.openConfirm("run", it, "Exécuter maintenant l'action de « "+it.Title+" » ?")
 	case "z":
-		return m.ask(pSnooze, "1d, 7d, 2w, ou une date", "7d")
+		m.openSnooze(it)
 	case "E":
 		if d := m.details[it.ID]; d != nil {
-			m.form = newForm(m, d)
-			return m.form.focus()
+			m.openEntryForm(d)
 		}
 	case "N":
 		return m.editFile(it, true)
@@ -702,35 +710,10 @@ func (m *model) keyPrompt(k tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m *model) submit(p prompt, v string) tea.Cmd {
-	yes := strings.EqualFold(v, "o") || strings.EqualFold(v, "oui") || strings.EqualFold(v, "y")
-	it, _ := m.current()
 	switch p {
 	case pFilter:
 		m.filter = v
 		m.apply()
-	case pSnooze:
-		if v == "" {
-			return nil
-		}
-		args := map[string]any{"id": it.ID, "sphere": it.Sphere}
-		if _, err := when.ParseDuration(v); err == nil {
-			args["by"] = v
-		} else {
-			args["to"] = v
-		}
-		return m.act("snooze", args, it.ID+" reportée")
-	case pConfirmDrop:
-		if yes {
-			return m.act("drop", map[string]any{"id": it.ID, "sphere": it.Sphere}, it.ID+" abandonnée")
-		}
-	case pConfirmRm:
-		if yes {
-			return m.act("rm", map[string]any{"id": it.ID, "sphere": it.Sphere}, it.ID+" supprimée")
-		}
-	case pConfirmRun:
-		if yes {
-			return m.act("run", map[string]any{"id": it.ID, "sphere": it.Sphere}, it.ID+" exécutée")
-		}
 	}
 	return nil
 }

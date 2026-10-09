@@ -85,7 +85,7 @@ func waitSignal(ch chan os.Signal) tea.Cmd {
 }
 
 // atRest: no form, no prompt open.
-func (m *model) atRest() bool { return m.form == nil && m.prompt == pNone }
+func (m *model) atRest() bool { return !m.modal.Open() && m.prompt == pNone }
 
 // maybeReload quits for a reload when one is pending and the TUI is at rest.
 func (m *model) maybeReload() tea.Cmd {
