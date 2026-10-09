@@ -594,5 +594,28 @@ func task(ctx context.Context, c config.Connector, w Window) ([]Item, error) {
 		}
 		out = append(out, Item{ID: t.ID, Title: t.Title, At: at, AllDay: isDate(t.Due), Detail: strings.Join(parts, " · "), Ref: ref})
 	}
+	// A task set aside comes back on its day: a line « réveil » on that day.
+	var incubating struct {
+		Items []struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+			Until string `json:"until"`
+			Ref   string `json:"ref"`
+		} `json:"items"`
+	}
+	if err := run(ctx, &incubating, bin(c, "task"), "ls", "--format", "json", "--sphere", sphere, "--state", "incubating"); err != nil {
+		return nil, err
+	}
+	for _, t := range incubating.Items {
+		at, ok := parseTime(t.Until, loc)
+		if t.Until == "" || !ok {
+			continue
+		}
+		ref := t.Ref
+		if ref == "" {
+			ref = "task:" + t.ID
+		}
+		out = append(out, Item{ID: t.ID + "@wake", Title: "réveil : " + t.Title, At: at, AllDay: isDate(t.Until), Detail: "mise de côté", Ref: ref})
+	}
 	return out, nil
 }
