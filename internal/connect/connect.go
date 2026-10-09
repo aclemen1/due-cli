@@ -38,6 +38,8 @@ type Item struct {
 	// Refs are every ref of the line, Ref first; never null in JSON. Ref stays for
 	// the tools that still read a single one.
 	Refs []string `json:"refs"`
+	// Paths are the files the line comes from (records of the memory), never null.
+	Paths []string `json:"paths"`
 	// Since is when an office dossier went waiting.
 	Since *time.Time `json:"waiting_since,omitempty"`
 }
@@ -126,6 +128,9 @@ func One(c config.Connector, w Window) ([]Item, error) {
 		}
 		it.Source, it.Type = c.Name, c.Type
 		it.Refs = NormRefs(it.Ref, it.Refs)
+		if it.Paths == nil {
+			it.Paths = []string{}
+		}
 		if it.At.Before(w.Now) && !it.AllDay {
 			it.Late = true
 		}
@@ -523,6 +528,8 @@ func command(ctx context.Context, c config.Connector, w Window) ([]Item, error) 
 		Detail string   `json:"detail"`
 		Ref    string   `json:"ref"`
 		Refs   []string `json:"refs"`
+		Path   string   `json:"path"`
+		Paths  []string `json:"paths"`
 		Kind   string   `json:"kind"`
 	}
 	var lines []line
@@ -556,7 +563,7 @@ func command(ctx context.Context, c config.Connector, w Window) ([]Item, error) 
 		} else if l.Kind != "" {
 			detail = kindLabel(l.Kind)
 		}
-		out = append(out, Item{ID: l.ID, Title: l.Title, At: t, AllDay: allDay, Detail: detail, Ref: l.Ref, Refs: l.Refs})
+		out = append(out, Item{ID: l.ID, Title: l.Title, At: t, AllDay: allDay, Detail: detail, Ref: l.Ref, Refs: l.Refs, Paths: NormRefs(l.Path, l.Paths)})
 	}
 	return out, nil
 }
