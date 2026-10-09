@@ -110,7 +110,7 @@ echo '{"ok":true,"result":{"items":[
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 3 || !items[0].AllDay || items[0].Ref != "task:UT-0001" || items[1].Detail != "Marc · attend Camptocamp" || items[1].Ref != "office:U-0002" || len(items[1].Refs) != 2 || items[1].Refs[0] != "oj:RDIR-3" ||
+	if len(items) != 3 || !items[0].AllDay || items[0].Ref != "task:UT-0001" || items[1].Detail != "Marc · attend Camptocamp" || items[1].Ref != "office:U-0002" || len(items[1].Refs) != 3 || items[1].Refs[0] != "office:U-0002" || items[1].Refs[1] != "oj:RDIR-3" ||
 		items[2].Title != "réveil : Relancer le fournisseur" || items[2].ID != "UT-0009@wake" {
 		t.Fatalf("got %+v", items)
 	}

@@ -35,8 +35,9 @@ type Item struct {
 	// Critical is the judge's probability that forgetting the line costs dearly; nil until judged.
 	Critical *float64 `json:"critical,omitempty"`
 	Nature   string   `json:"nature,omitempty"` // legal, financial, irreversible, none
-	// Refs are further refs of the line (a task citing several things); Ref is the first.
-	Refs []string `json:"refs,omitempty"`
+	// Refs are every ref of the line, Ref first; never null in JSON. Ref stays for
+	// the tools that still read a single one.
+	Refs []string `json:"refs"`
 	// Since is when an office dossier went waiting.
 	Since *time.Time `json:"waiting_since,omitempty"`
 }
@@ -124,6 +125,7 @@ func One(c config.Connector, w Window) ([]Item, error) {
 			continue
 		}
 		it.Source, it.Type = c.Name, c.Type
+		it.Refs = NormRefs(it.Ref, it.Refs)
 		if it.At.Before(w.Now) && !it.AllDay {
 			it.Late = true
 		}
@@ -289,6 +291,7 @@ func calendar(ctx context.Context, c config.Connector, w Window) ([]Item, error)
 				ID       string `json:"id"`
 				Title    string `json:"title"`
 				Start    string `json:"startDate"`
+				UID      string `json:"externalId"`
 				AllDay   bool   `json:"isAllDay"`
 				Calendar string `json:"calendar"`
 				Status   string `json:"status"`
@@ -305,7 +308,12 @@ func calendar(ctx context.Context, c config.Connector, w Window) ([]Item, error)
 			if !ok {
 				continue
 			}
-			out = append(out, Item{ID: e.ID, Title: e.Title, At: t, AllDay: e.AllDay, Detail: e.Calendar, Ref: "event:" + e.ID})
+			// The iCal UID is the same on every device and for every occurrence of a series.
+			ref := "event:" + e.ID
+			if e.UID != "" {
+				ref = "agenda:" + e.UID
+			}
+			out = append(out, Item{ID: e.ID, Title: e.Title, At: t, AllDay: e.AllDay, Detail: e.Calendar, Ref: ref})
 		}
 	}
 	return out, nil
@@ -636,7 +644,7 @@ func taskRefs(id, ref string, refs []string) (string, []string) {
 	if len(refs) == 0 {
 		return "task:" + id, nil
 	}
-	return refs[0], append(refs[1:], "task:"+id)
+	return refs[0], append(refs, "task:"+id)
 }
 
 func prefixOf(c config.Connector) string {
@@ -684,4 +692,17 @@ func citedRefs(ctx context.Context, c config.Connector) (map[string]bool, error)
 		}
 	}
 	return out, nil
+}
+
+// NormRefs is a line's refs, its main ref first, without duplicates; never nil.
+func NormRefs(ref string, refs []string) []string {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, r := range append([]string{ref}, refs...) {
+		if r != "" && !seen[r] {
+			seen[r] = true
+			out = append(out, r)
+		}
+	}
+	return out
 }
