@@ -173,6 +173,15 @@ func (m *model) apply() {
 			out = append(out, m.conn[k]...)
 		}
 	}
+	if m.sphereOnly != "" {
+		var kept []connect.Item
+		for _, it := range out {
+			if it.Sphere == m.sphereOnly {
+				kept = append(kept, it)
+			}
+		}
+		out = kept
+	}
 	if m.critOnly {
 		var kept []connect.Item
 		for _, it := range out {
@@ -202,6 +211,24 @@ func (m *model) apply() {
 		})
 	} else {
 		connect.Sort(out)
+	}
+	if m.sortBy > 0 || m.sortRev {
+		by := sorts[m.sortBy]
+		sort.SliceStable(out, func(i, j int) bool {
+			var a, b string
+			switch by {
+			case "titre":
+				a, b = strings.ToLower(out[i].Title), strings.ToLower(out[j].Title)
+			case "source":
+				a, b = out[i].Source, out[j].Source
+			default:
+				return out[i].At.Before(out[j].At) != m.sortRev
+			}
+			if a == b {
+				return false
+			}
+			return (a < b) != m.sortRev
+		})
 	}
 	m.items = out
 	sel := -1

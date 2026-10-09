@@ -141,9 +141,9 @@ func TestEmptyLedgerThenFormAndDetail(t *testing.T) {
 func TestFormEditsTheEntry(t *testing.T) {
 	m := setup(t)
 	add(t, m, "Passeport", "01.12.2026", "30d")
-	press(t, m, "e")
+	press(t, m, "E")
 	if m.form == nil || m.form.val("title") != "Passeport" || m.form.val("notice") != "30d" {
-		t.Fatal("e opens the form filled in")
+		t.Fatal("E opens the form filled in")
 	}
 	typeText(t, m, " d'Eve")
 	press(t, m, "ctrl+s")
@@ -158,7 +158,7 @@ func TestViewsEscAndDone(t *testing.T) {
 	if s := screen(m); !strings.Contains(s, "Plus tard") || !strings.Contains(s, "Garantie lave-linge") {
 		t.Fatalf("the ledger shows every date:\n%s", s)
 	}
-	press(t, m, "s")
+	press(t, m, "2")
 	if s := screen(m); !strings.Contains(s, "Rien d'échu") || !strings.Contains(s, "jusqu'au") {
 		t.Fatalf("toutes keeps the horizon:\n%s", s)
 	}
@@ -298,8 +298,8 @@ func TestStateSurvivesARestart(t *testing.T) {
 	press(t, m, "k") // select the first entry
 	press(t, m, "tab")
 	press(t, m, "f")
-	press(t, m, "c")
-	press(t, m, "c")
+	press(t, m, "!")
+	press(t, m, "!")
 	_, _ = m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}) // ctrl+c, not q
 
 	again := newModel(m.cfgPath, m.cfg, m.spheres)
@@ -311,5 +311,44 @@ func TestStateSurvivesARestart(t *testing.T) {
 	}
 	if it, ok := again.current(); !ok || it.Title != "Passeport" {
 		t.Fatalf("the selected line comes back, got %+v", it)
+	}
+}
+
+func TestConventionKeys(t *testing.T) {
+	m := setup(t)
+	press(t, m, "c")
+	if m.form == nil {
+		t.Fatal("c opens a new entry")
+	}
+	press(t, m, "esc")
+	add(t, m, "Garantie", "01.03.2027", "")
+	add(t, m, "Bail", "31.10.2026", "")
+	press(t, m, "G")
+	press(t, m, "g")
+	press(t, m, "g")
+	if it, _ := m.current(); it.Title != "Bail" {
+		t.Fatalf("gg goes to the top, got %s", it.Title)
+	}
+	press(t, m, "]")
+	if it, _ := m.current(); it.Title != "Garantie" {
+		t.Fatalf("] goes to the next group, got %s", it.Title)
+	}
+	press(t, m, "space")
+	if len(m.items) != 1 {
+		t.Fatal("space marks the entry done")
+	}
+	press(t, m, "t")
+	if !strings.Contains(screen(m), "tri titre") {
+		t.Fatalf("t sorts by title:\n%s", screen(m))
+	}
+	press(t, m, "h")
+	press(t, m, "x")
+	if m.prompt != pConfirmDrop {
+		t.Fatal("x asks before dropping")
+	}
+	press(t, m, "esc")
+	press(t, m, "#")
+	if m.prompt != pConfirmRm {
+		t.Fatal("# asks before deleting")
 	}
 }

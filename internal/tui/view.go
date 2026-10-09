@@ -167,6 +167,12 @@ func (m *model) header(w int) []string {
 	if m.filter != "" {
 		scope = "filtre « " + m.filter + " » · " + scope
 	}
+	if m.sphereOnly != "" {
+		scope = m.sphereOnly + " seulement · " + scope
+	}
+	if m.sortBy > 0 || m.sortRev {
+		scope = "tri " + sorts[m.sortBy] + map[bool]string{true: " ↑", false: ""}[m.sortRev] + " · " + scope
+	}
 	if gap = w - ansi.StringWidth(line2) - ansi.StringWidth(scope); gap >= 2 {
 		line2 += strings.Repeat(" ", gap) + sMuted.Render(scope)
 	}
@@ -213,11 +219,11 @@ func (m *model) footer(w int) string {
 	it, ok := m.current()
 	switch {
 	case ok && it.Type == "due":
-		return helpLine("a", "ajouter", "e", "modifier", "d", "faite", "z", "reporter", "R", "exécuter", "s", "vue suivante", "/", "chercher", "?", "aide", "q", "quitter")
+		return helpLine("c", "nouvelle", "E", "modifier", "espace", "faite", "z", "reporter", "x", "abandonner", "R", "exécuter", "/", "filtrer", "?", "aide", "q", "quitter")
 	case ok && it.Type == "office":
-		return helpLine("a", "ajouter", "o", "ouvrir le dossier", "s", "vue suivante", "esc", "registre", "/", "chercher", "?", "aide", "q", "quitter")
+		return helpLine("c", "nouvelle", "o", "ouvrir le dossier", "1-9", "vues", "s", "sphère", "esc", "registre", "/", "filtrer", "?", "aide", "q", "quitter")
 	default:
-		return helpLine("a", "ajouter", "s", "vue suivante", "c", "critiques", "H", "horizon", "esc", "registre", "/", "chercher", "?", "aide", "q", "quitter")
+		return helpLine("c", "nouvelle", "1-9", "vues", "s", "sphère", "!", "critiques", "t", "trier", "esc", "registre", "/", "filtrer", "?", "aide", "q", "quitter")
 	}
 }
 
@@ -225,36 +231,44 @@ func (m *model) help(w int) []string {
 	col := func(k, v string) string { return "  " + sKey.Render(fmt.Sprintf("%-14s", k)) + sText.Render(v) }
 	out := []string{
 		sSection.Render("Se déplacer"),
-		col("↑ ↓  j k", "ligne précédente, suivante"),
+		col("j k  ↑ ↓", "ligne suivante, précédente"),
+		col("gg  G", "début, fin de la liste"),
+		col("[  ]", "groupe précédent, suivant (période ou jour)"),
 		col("pgup pgdn", "page"),
-		col("g  G", "début, fin"),
 		col("J K", "faire défiler le détail"),
+		col("enter  l", "ouvrir le détail"),
+		col("esc  h", "revenir : ferme l'aide, efface les filtres, puis revient au registre"),
 		col("souris", "clic : choisir ; molette : défiler"),
 		"",
 		sSection.Render("Vues"),
-		col("s  S  ← →", "vue suivante, précédente : registre, toutes, chaque source"),
-		col("1 … 9", "aller à une vue"),
-		col("esc", "efface le filtre, puis revient au registre"),
-		col("H", "horizon des vues toutes et sources : 7, 30, 90, 365 jours"),
-		col("c", "lignes critiques seulement : conséquences juridiques, financières ou irréversibles si oubliées"),
+		col("1 … 9", "aller à une vue : registre, toutes, chaque source"),
+		col("← →  S", "vue précédente, suivante"),
+		col("s", "sphère : toutes, puis chacune seule"),
+		col("t  T", "trier (date, titre, source), inverser le tri"),
+		col("/", "filtrer sur le titre et le détail"),
+		col("!", "lignes critiques seulement (conséquences juridiques, financières, irréversibles)"),
 		col("f", "montrer aussi les échéances faites et abandonnées"),
+		col("H", "horizon des vues toutes et sources : 7, 30, 90, 365 jours"),
 		col("tab", "montrer ou masquer le détail"),
-		col("/", "chercher dans les titres et détails"),
 		col("r", "relire toutes les sources"),
 		"",
 		sSection.Render("Registre"),
-		col("a", "ajouter une échéance"),
-		col("e  E", "modifier (formulaire, ou fichier dans $EDITOR)"),
-		col("d", "faite, ou rouvrir"),
+		col("c", "nouvelle échéance"),
+		col("E", "modifier (formulaire)"),
+		col("N", "ajouter aux notes (éditeur, en fin de fichier)"),
+		col("e", "clore : faite"),
+		col("espace", "faite, ou rouvrir"),
 		col("z", "reporter (7d, 2w, une date)"),
 		col("R", "exécuter l'action maintenant"),
-		col("x  D", "abandonner, supprimer"),
-		col("o  ↵", "ouvrir la ligne (dossier d'office)"),
+		col("x", "abandonner (réversible)"),
+		col("#", "supprimer définitivement, après confirmation"),
+		col("o", "ouvrir l'objet lié (dossier d'office)"),
 		"",
+		sMuted.Render("  Anciennes touches encore acceptées : a (nouvelle), d (faite), D (supprimer)."),
 		sMuted.Render("  Le registre garde ce qu'aucun autre outil ne porte : contrat, garantie, délai légal."),
 		sMuted.Render("  Les autres lignes se lisent ici et se modifient dans leur outil."),
-		sMuted.Render("  Mise à jour : à chaque changement des fichiers d'office, routine, oj et du registre ;"),
-		sMuted.Render("  rappels et agendas dès que macos watch les signale (sinon chaque minute)."),
+		sMuted.Render("  Mise à jour : à chaque changement des fichiers d'office, routine, oj, task et du registre ;"),
+		sMuted.Render("  agendas dès que macos watch les signale (sinon chaque minute)."),
 	}
 	if len(m.connErr) > 0 {
 		out = append(out, "", sSection.Render("Sources en erreur"))

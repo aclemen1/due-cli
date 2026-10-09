@@ -68,9 +68,11 @@ It updates itself: the files of the ledger, office, routine, oj and task are
 watched; reminders and calendars follow `macos watch` (read again every minute
 when it is not running).
 
-`a` add · `e` edit (form) · `E` edit the file · `d` done/reopen · `z` snooze ·
-`R` run now · `x` drop · `D` delete · `o` open (office dossier) · `f` done too ·
-`H` horizon · `/` search · `r` read again · `?` help · `esc` back · `q` quit.
+Keys follow the ecosystem convention: `j k` · `gg G` · `[ ]` groups · `enter l` open ·
+`esc h` back · `1`–`9` views · `s` sphere · `t T` sort · `/` filter · `!` critical ·
+`c` new · `E` edit · `N` notes (end of file) · `e` close · `space` done/reopen ·
+`z` snooze · `R` run now · `x` drop · `#` delete · `o` open · `f` done too ·
+`H` horizon · `tab` detail · `r` read again · `?` help · `q` quit.
 Mouse: click to select, wheel to scroll.
 
 ## License

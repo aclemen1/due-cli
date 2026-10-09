@@ -111,13 +111,17 @@ type model struct {
 	macosOn bool         // macos watch is live: no polling of those sources
 
 	// what is shown
-	source   int // index in views(): 0 the ledger, 1 everything, then each connector
-	horizon  int
-	filter   string
-	showDone bool
-	critOnly bool
-	detailOn bool
-	helpOn   bool
+	source     int // index in views(): 0 the ledger, 1 everything, then each connector
+	horizon    int
+	filter     string
+	showDone   bool
+	critOnly   bool
+	sphereOnly string // one sphere among those shown, or all
+	sortBy     int    // index in sorts
+	sortRev    bool
+	pendingG   bool // g pressed once: gg goes to the top
+	detailOn   bool
+	helpOn     bool
 
 	// data
 	ledger   []connect.Item
@@ -398,18 +402,31 @@ func (m *model) setView(i int) tea.Cmd {
 	return nil
 }
 
+// keyList follows the ecosystem's key convention; older keys stay where they
+// clash with none of it (a, d, D, S, arrows).
 func (m *model) keyList(k tea.KeyPressMsg) tea.Cmd {
 	page := max(1, m.listH-2)
-	switch s := k.String(); s {
+	s := k.String()
+	if s != "g" {
+		m.pendingG = false
+	}
+	switch s {
 	case "up", "k":
 		m.selectIndex(m.sel - 1)
 	case "down", "j":
 		m.selectIndex(m.sel + 1)
 	case "pgup", "ctrl+b":
 		m.selectIndex(m.sel - page)
-	case "pgdown", "ctrl+f", "space":
+	case "pgdown", "ctrl+f":
 		m.selectIndex(m.sel + page)
-	case "home", "g":
+	case "g":
+		if m.pendingG {
+			m.pendingG = false
+			m.selectIndex(0)
+		} else {
+			m.pendingG = true
+		}
+	case "home":
 		m.selectIndex(0)
 	case "end", "G":
 		m.selectIndex(len(m.items) - 1)
@@ -417,7 +434,11 @@ func (m *model) keyList(k tea.KeyPressMsg) tea.Cmd {
 		m.scroll += 3
 	case "K", "ctrl+u":
 		m.scroll = max(0, m.scroll-3)
-	case "esc":
+	case "[":
+		m.selectIndex(m.groupStart(m.sel, -1))
+	case "]":
+		m.selectIndex(m.groupStart(m.sel, 1))
+	case "esc", "h":
 		switch {
 		case m.helpOn:
 			m.helpOn = false
@@ -427,6 +448,9 @@ func (m *model) keyList(k tea.KeyPressMsg) tea.Cmd {
 		case m.critOnly:
 			m.critOnly = false
 			m.apply()
+		case m.sphereOnly != "":
+			m.sphereOnly = ""
+			m.apply()
 		case !m.ledgerOnly():
 			return m.setView(0)
 		}
@@ -434,34 +458,41 @@ func (m *model) keyList(k tea.KeyPressMsg) tea.Cmd {
 		m.helpOn = !m.helpOn
 	case "tab":
 		m.detailOn = !m.detailOn
-		m.persist()
 	case "/":
 		return m.ask(pFilter, "titre, détail, source…", m.filter)
-	case "s", "right", "l":
+	case "right":
 		return m.setView(m.source + 1)
-	case "S", "left", "h":
+	case "left", "S":
 		return m.setView(m.source - 1)
+	case "s":
+		m.cycleSphere()
+	case "t":
+		m.sortBy = (m.sortBy + 1) % len(sorts)
+		m.apply()
+		m.setStatus("tri par "+sorts[m.sortBy], false)
+	case "T":
+		m.sortRev = !m.sortRev
+		m.apply()
+		m.setStatus(map[bool]string{true: "tri inversé", false: "tri normal"}[m.sortRev], false)
 	case "H":
 		m.horizon = (m.horizon + 1) % len(horizons)
-		m.persist()
 		if m.ledgerOnly() {
 			m.setStatus("horizon "+horizons[m.horizon]+" (vue toutes et connecteurs)", false)
 		}
 		return m.loadAll()
-	case "c":
+	case "!":
 		m.critOnly = !m.critOnly
 		m.apply()
 		if m.critOnly {
-			m.setStatus("lignes critiques seulement (c pour tout revoir)", false)
+			m.setStatus("lignes critiques seulement (! pour tout revoir)", false)
 		}
 	case "f":
 		m.showDone = !m.showDone
-		m.persist()
 		return m.loadLedger()
 	case "r":
 		m.setStatus("relecture de toutes les sources", false)
 		return tea.Batch(m.loadLedger(), m.loadAll())
-	case "a":
+	case "c", "a":
 		m.form = newForm(m, nil)
 		return m.form.focus()
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
@@ -481,39 +512,109 @@ func (m *model) keyEntry(key string) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	if key == "o" || key == "enter" {
+	switch key {
+	case "o":
 		return m.open(it)
+	case "enter", "l":
+		m.detailOn = true
+		return nil
+	case "W", "*":
+		m.setStatus("sans objet dans due : une échéance n'attend personne et ne prend pas d'étoile", true)
+		return nil
 	}
-	if !strings.Contains("dxzeERD", key) || len(key) != 1 {
+	if !contains([]string{"e", "space", "d", "x", "#", "D", "R", "z", "E", "N"}, key) {
 		return nil
 	}
 	if it.Type != "due" {
 		m.setStatus("cette ligne vient de "+it.Source+" : elle se modifie dans "+it.Type+" (o pour l'ouvrir)", true)
 		return nil
 	}
+	ids := map[string]any{"id": it.ID, "sphere": it.Sphere}
 	switch key {
-	case "d":
-		if it.State != "open" {
-			return m.act("reopen", map[string]any{"id": it.ID, "sphere": it.Sphere}, it.ID+" rouverte")
+	case "e":
+		if it.State == "open" {
+			return m.act("done", ids, it.ID+" faite")
 		}
-		return m.act("done", map[string]any{"id": it.ID, "sphere": it.Sphere}, it.ID+" faite")
+		m.setStatus(it.ID+" est déjà close (espace pour la rouvrir)", false)
+	case "space", "d":
+		if it.State != "open" {
+			return m.act("reopen", ids, it.ID+" rouverte")
+		}
+		return m.act("done", ids, it.ID+" faite")
 	case "x":
 		return m.ask(pConfirmDrop, "o pour abandonner « "+it.Title+" »", "")
-	case "D":
+	case "#", "D":
 		return m.ask(pConfirmRm, "o pour supprimer définitivement « "+it.Title+" »", "")
 	case "R":
 		return m.ask(pConfirmRun, "o pour exécuter maintenant l'action de « "+it.Title+" »", "")
 	case "z":
 		return m.ask(pSnooze, "1d, 7d, 2w, ou une date", "7d")
-	case "e":
+	case "E":
 		if d := m.details[it.ID]; d != nil {
 			m.form = newForm(m, d)
 			return m.form.focus()
 		}
-	case "E":
-		return m.editFile(it)
+	case "N":
+		return m.editFile(it, true)
 	}
 	return nil
+}
+
+var sorts = []string{"date", "titre", "source"}
+
+// cycleSphere shows every sphere, then each one alone.
+func (m *model) cycleSphere() {
+	if !m.multi() {
+		m.setStatus("une seule sphère est montrée", false)
+		return
+	}
+	order := append([]string{""}, m.spheres...)
+	for i, s := range order {
+		if s == m.sphereOnly {
+			m.sphereOnly = order[(i+1)%len(order)]
+			break
+		}
+	}
+	m.apply()
+	if m.sphereOnly == "" {
+		m.setStatus("toutes les sphères", false)
+	} else {
+		m.setStatus("sphère "+m.sphereOnly+" seulement", false)
+	}
+}
+
+// groupStart is the first line of the next (dir 1) or previous (dir -1)
+// group: a period in the ledger, a day elsewhere.
+func (m *model) groupStart(i, dir int) int {
+	if len(m.items) == 0 {
+		return 0
+	}
+	label := func(j int) string {
+		if m.ledgerOnly() {
+			return period(m.items[j], m.now())
+		}
+		return m.items[j].At.Format("2006-01-02")
+	}
+	cur := label(i)
+	j := i
+	if dir > 0 {
+		for j < len(m.items)-1 && label(j) == cur {
+			j++
+		}
+		return j
+	}
+	// back to the start of this group, then of the previous one
+	for j > 0 && label(j-1) == cur {
+		j--
+	}
+	if j == i && j > 0 {
+		j--
+		prev := label(j)
+		for j > 0 && label(j-1) == prev {
+			j--
+		}
+	}
+	return j
 }
 
 // open shows a line in its own tool: the dossier's session for office.
@@ -545,7 +646,9 @@ func (m *model) open(it connect.Item) tea.Cmd {
 	return nil
 }
 
-func (m *model) editFile(it connect.Item) tea.Cmd {
+// editFile opens an entry's file; to add notes (atEnd), vim and nvim start
+// on a new last line in insert mode.
+func (m *model) editFile(it connect.Item, atEnd bool) tea.Cmd {
 	id := it.ID
 	s := m.cfg.Spheres[it.Sphere]
 	path := filepath.Join(s.Root, id+".md")
@@ -553,7 +656,11 @@ func (m *model) editFile(it connect.Item) tea.Cmd {
 	if editor == "" {
 		editor = "vi"
 	}
-	cmd := exec.Command("sh", "-c", editor+` "$1"`, "sh", path)
+	args := ` "$1"`
+	if base := filepath.Base(strings.Fields(editor)[0]); atEnd && (base == "nvim" || base == "vim") {
+		args = ` '+normal! Go' +startinsert "$1"`
+	}
+	cmd := exec.Command("sh", "-c", editor+args, "sh", path)
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		if err != nil {
 			return doneMsg{err: err}
