@@ -254,7 +254,7 @@ func (m *model) help(w int) []string {
 		sMuted.Render("  Le registre garde ce qu'aucun autre outil ne porte : contrat, garantie, délai légal."),
 		sMuted.Render("  Les autres lignes se lisent ici et se modifient dans leur outil."),
 		sMuted.Render("  Mise à jour : à chaque changement des fichiers d'office, routine, oj et du registre ;"),
-		sMuted.Render("  rappels et agendas toutes les minutes."),
+		sMuted.Render("  rappels et agendas dès que macos watch les signale (sinon chaque minute)."),
 	}
 	if len(m.connErr) > 0 {
 		out = append(out, "", sSection.Render("Sources en erreur"))

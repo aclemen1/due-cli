@@ -64,8 +64,9 @@ follows the selection (right from 110 columns, below otherwise; `tab` hides it)
 and shows each entry's timeline of notices and term. `a` and `e` open a form
 that reads the date and notices as you type.
 
-It updates itself: the files of the ledger, office, routine and oj are watched;
-reminders and calendars are read again every minute.
+It updates itself: the files of the ledger, office, routine, oj and task are
+watched; reminders and calendars follow `macos watch` (read again every minute
+when it is not running).
 
 `a` add · `e` edit (form) · `E` edit the file · `d` done/reopen · `z` snooze ·
 `R` run now · `x` drop · `D` delete · `o` open (office dossier) · `f` done too ·

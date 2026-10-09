@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/aclemen1/due-cli/internal/actions"
+	"github.com/aclemen1/due-cli/internal/watch"
 )
 
 // The TUI reloads itself when its binary is rebuilt, or on SIGUSR1, once at rest.
@@ -125,4 +126,34 @@ func reloadedStatus() string {
 	}
 	_ = os.Unsetenv("DUE_TUI_RELOADED")
 	return fmt.Sprintf("rechargé %s", Build())
+}
+
+type macosMsg watch.MacosEvent
+
+func waitMacos(w *watch.Macos) tea.Cmd {
+	return func() tea.Msg { return macosMsg(<-w.C) }
+}
+
+// onMacos re-reads the sources macos watch says changed; polling takes over if it stops.
+func (m *model) onMacos(ev watch.MacosEvent) tea.Cmd {
+	if ev.End {
+		m.macosOn = false
+		return nil
+	}
+	cmds := []tea.Cmd{waitMacos(m.macos)}
+	switch ev.Event {
+	case "ready":
+		m.macosOn = true
+	case "reset":
+		cmds = append(cmds, m.loadAll())
+	case "changed":
+		for _, c := range m.connectors() {
+			for _, d := range ev.Domains {
+				if c.c.Type == d {
+					cmds = append(cmds, m.loadConn(c.key()))
+				}
+			}
+		}
+	}
+	return tea.Batch(cmds...)
 }

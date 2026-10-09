@@ -47,6 +47,20 @@ func init() {
 				m.watcher = w
 				defer w.Close()
 			}
+			var domains []string
+			for _, sp := range spheres {
+				for _, d := range watch.MacosDomains(cfg.Spheres[sp]) {
+					if !contains(domains, d) {
+						domains = append(domains, d)
+					}
+				}
+			}
+			if len(domains) > 0 {
+				if mw, err := watch.StartMacos("", domains); err == nil {
+					m.macos = mw
+					defer mw.Close()
+				}
+			}
 			m.restore()
 			m.bin, _ = ownBinary()
 			m.signals = startSignals()
@@ -57,6 +71,9 @@ func init() {
 			if err == nil && m.reloading {
 				if m.watcher != nil {
 					m.watcher.Close()
+				}
+				if m.macos != nil {
+					m.macos.Close()
 				}
 				return spec.Streamed{}, execAgain(m.bin.path)
 			}
@@ -90,6 +107,8 @@ type model struct {
 	spheres []string
 	now     func() time.Time
 	watcher *watch.Watcher
+	macos   *watch.Macos // Reminders and Calendar changes, from macos watch
+	macosOn bool         // macos watch is live: no polling of those sources
 
 	// what is shown
 	source   int // index in views(): 0 the ledger, 1 everything, then each connector
@@ -212,6 +231,9 @@ func (m *model) Init() tea.Cmd {
 	if m.signals != nil {
 		cmds = append(cmds, waitSignal(m.signals))
 	}
+	if m.macos != nil {
+		cmds = append(cmds, waitMacos(m.macos))
+	}
 	if m.watcher != nil {
 		cmds = append(cmds, waitWatch(m.watcher))
 	}
@@ -262,6 +284,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.BackgroundColorMsg:
 		darkBackground = msg.IsDark()
+	case macosMsg:
+		return m, m.onMacos(watch.MacosEvent(msg))
 	case binCheckMsg:
 		return m, m.onBinCheck()
 	case signalMsg:
@@ -284,9 +308,12 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.now().Sub(m.lastFull) > fullEvery {
 			cmds = append(cmds, m.loadLedger(), m.loadAll())
 		} else {
-			for _, sp := range m.spheres {
-				for _, key := range watch.Polled(m.cfg.Spheres[sp], sp) {
-					cmds = append(cmds, m.loadConn(key))
+			for _, c := range m.connectors() {
+				if m.macosOn && (c.c.Type == "reminders" || c.c.Type == "calendar") {
+					continue
+				}
+				if c.c.Type == "reminders" || c.c.Type == "calendar" || c.c.Type == "command" {
+					cmds = append(cmds, m.loadConn(c.key()))
 				}
 			}
 		}
