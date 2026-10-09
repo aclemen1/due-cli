@@ -18,8 +18,17 @@ type Config struct {
 	DefaultTime string            `yaml:"default_time,omitempty"`
 	Spheres     map[string]Sphere `yaml:"spheres"`
 	Judge       Judge             `yaml:"judge,omitempty"`
+	Notes       Notes             `yaml:"notes,omitempty"`
 
 	path string
+}
+
+// Notes are kept by another tool; due lists and adds them by ref (due:<id>).
+// Placeholders: {ref}, {sphere}; add reads the text on stdin.
+type Notes struct {
+	Ls   []string `yaml:"ls,omitempty"`
+	Add  []string `yaml:"add,omitempty"`
+	Dirs []string `yaml:"dirs,omitempty"` // watched by the TUI
 }
 
 // Judge asks a decision model which lines would cost dearly if forgotten.

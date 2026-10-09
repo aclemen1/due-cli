@@ -49,6 +49,11 @@ due done 7 --note "<résultat>" --sphere perso
 | `--ref` | what the entry belongs to, e.g. `office:P-0040` |
 | `--via` | channel: `mail` (can wait), `tell` (Telegram, needs attention), `push` (Pushover, urgent); default by attention |
 
+## Notes
+
+A note on an entry is kept by the note tool, never in the entry's body (the body is the message or prompt of its action):
+`note add "<texte>" --ref due:PE-0007 --sphere perso`. `due show` lists them; in the TUI, `N` adds one.
+
 ## Channels
 
 | Message | Channel |

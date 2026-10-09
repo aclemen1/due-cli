@@ -181,7 +181,13 @@ func registerEntries() {
 			if err != nil {
 				return nil, err
 			}
-			return DetailOf(l, e), nil
+			d := DetailOf(l, e)
+			if notes, err := NotesOf(cfg, "due:"+e.ID); err != nil {
+				ctx.Warn("notes: " + err.Error())
+			} else {
+				d.Notes = notes
+			}
+			return d, nil
 		},
 		Text: textDetail,
 	})
@@ -384,6 +390,7 @@ type Detail struct {
 	Sphere   string     `json:"sphere"`
 	Term     time.Time  `json:"term"`
 	Upcoming []Upcoming `json:"upcoming"`
+	Notes    []Note     `json:"notes,omitempty"`
 }
 
 type Upcoming struct {
@@ -453,6 +460,12 @@ func textDetail(w io.Writer, v any) {
 	}
 	if e.Body != "" {
 		fmt.Fprintf(w, "\n%s\n", e.Body)
+	}
+	if len(d.Notes) > 0 {
+		fmt.Fprintln(w, "\nNotes:")
+		for _, n := range d.Notes {
+			fmt.Fprintf(w, "  %s  %s  %s\n", n.ID, n.Created, strings.ReplaceAll(strings.TrimSpace(n.Body), "\n", "\n      "))
+		}
 	}
 	if len(e.Fired) > 0 {
 		fmt.Fprintln(w, "\nFired:")

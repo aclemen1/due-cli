@@ -319,3 +319,26 @@ func (m *model) restore() {
 	m.critOnly, m.filter = s.CritOnly, s.Filter
 	m.saved = b
 }
+
+type notesMsg map[string][]actions.Note
+
+// loadNotes fetches the notes of the entries, after the ledger: they never hold it up.
+func (m *model) loadNotes() tea.Cmd {
+	if len(m.cfg.Notes.Ls) == 0 {
+		return nil
+	}
+	var ids []string
+	for _, it := range m.ledger {
+		ids = append(ids, it.ID)
+	}
+	cfg := m.cfg
+	return func() tea.Msg {
+		out := notesMsg{}
+		for _, id := range ids {
+			if notes, err := actions.NotesOf(cfg, "due:"+id); err == nil {
+				out[id] = notes
+			}
+		}
+		return out
+	}
+}

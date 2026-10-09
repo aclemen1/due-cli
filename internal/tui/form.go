@@ -170,6 +170,17 @@ func (m *model) done(msg tuikit.DoneMsg) tea.Cmd {
 		return m.act("run", map[string]any{"id": it.ID, "sphere": it.Sphere}, it.ID+" exécutée")
 	case "rm":
 		return m.act("rm", map[string]any{"id": it.ID, "sphere": it.Sphere}, it.ID+" supprimée")
+	case "note":
+		text, cfg := v.String("note"), m.cfg
+		if text == "" {
+			return nil
+		}
+		return func() tea.Msg {
+			if err := actions.AddNote(cfg, "due:"+it.ID, it.Sphere, text); err != nil {
+				return doneMsg{err: err}
+			}
+			return doneMsg{status: "note ajoutée à " + it.ID}
+		}
 	}
 	return nil
 }

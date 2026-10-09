@@ -6,7 +6,6 @@ package tui
 import (
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -42,6 +41,9 @@ func init() {
 			var roots []watch.Root
 			for _, sp := range spheres {
 				roots = append(roots, watch.Roots(cfg.Spheres[sp], sp)...)
+			}
+			for _, d := range cfg.Notes.Dirs {
+				roots = append(roots, watch.Root{Source: spheres[0] + "/due", Dir: config.Expand(d), Depth: 0, Keep: func(p string) bool { return strings.HasSuffix(p, ".md") }})
 			}
 			if w, err := watch.Start(roots, 300*time.Millisecond); err == nil {
 				m.watcher = w
@@ -280,7 +282,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// An open modal takes every key, paste and click: no shortcut of the TUI fires.
 	if m.modal.Open() {
 		switch msg.(type) {
-		case tickMsg, pollMsg, watchMsg, ledgerMsg, connMsg, doneMsg, macosMsg, binCheckMsg, signalMsg,
+		case tickMsg, pollMsg, watchMsg, ledgerMsg, connMsg, doneMsg, notesMsg, macosMsg, binCheckMsg, signalMsg,
 			tuikit.DoneMsg, tuikit.CancelMsg, tea.BackgroundColorMsg, tea.WindowSizeMsg:
 		default:
 			return m, m.modal.Update(msg)
@@ -351,6 +353,13 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.ledger, m.details, m.loadedAt, m.ready = msg.items, msg.details, m.now(), true
 		m.apply()
+		return m, m.loadNotes()
+	case notesMsg:
+		for id, notes := range msg {
+			if d := m.details[id]; d != nil {
+				d.Notes = notes
+			}
+		}
 	case connMsg:
 		m.loading[msg.name] = false
 		if msg.err != nil {
@@ -563,7 +572,8 @@ func (m *model) keyEntry(key string) tea.Cmd {
 			m.openEntryForm(d)
 		}
 	case "N":
-		return m.editFile(it, true)
+		m.target = it
+		m.openModal("Note sur "+it.ID+" · "+trunc(it.Title, 40), tuikit.NewEditor("note", "Gardée par note, rattachée à due:"+it.ID, ""))
 	}
 	return nil
 }
@@ -652,34 +662,6 @@ func (m *model) open(it connect.Item) tea.Cmd {
 	m.detailOn = true
 	m.setStatus("rien à ouvrir pour une ligne de "+it.Type+" : voir le détail", false)
 	return nil
-}
-
-// editFile opens an entry's file; to add notes (atEnd), vim and nvim start
-// on a new last line in insert mode.
-func (m *model) editFile(it connect.Item, atEnd bool) tea.Cmd {
-	id := it.ID
-	s := m.cfg.Spheres[it.Sphere]
-	path := filepath.Join(s.Root, id+".md")
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = "vi"
-	}
-	args := ` "$1"`
-	if base := filepath.Base(strings.Fields(editor)[0]); atEnd && (base == "nvim" || base == "vim") {
-		args = ` '+normal! Go' +startinsert "$1"`
-	}
-	cmd := exec.Command("sh", "-c", editor+args, "sh", path)
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		if err != nil {
-			return doneMsg{err: err}
-		}
-		if s.VCS == "jj" {
-			c := exec.Command("jj", "commit", "-m", "edit "+id+" in $EDITOR")
-			c.Dir = s.Root
-			_ = c.Run()
-		}
-		return doneMsg{status: id + " modifiée"}
-	})
 }
 
 func (m *model) keyPrompt(k tea.KeyPressMsg) tea.Cmd {

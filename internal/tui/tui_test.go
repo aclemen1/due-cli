@@ -36,7 +36,7 @@ func drive(t *testing.T, m *model, cmd tea.Cmd) {
 		for _, c := range msg {
 			drive(t, m, c)
 		}
-	case ledgerMsg, connMsg, doneMsg, tuikit.DoneMsg, tuikit.CancelMsg:
+	case ledgerMsg, connMsg, doneMsg, notesMsg, tuikit.DoneMsg, tuikit.CancelMsg:
 		_, next := m.Update(msg)
 		drive(t, m, next)
 	}
@@ -366,4 +366,41 @@ func TestConventionKeys(t *testing.T) {
 	if !m.modal.Open() || !strings.Contains(screen(m), "Recopiez") {
 		t.Fatalf("# asks for the id before deleting:\n%s", screen(m))
 	}
+}
+
+func TestNotesThroughTheNoteTool(t *testing.T) {
+	m := setup(t)
+	dir := t.TempDir()
+	store := filepath.Join(dir, "notes.txt")
+	add := filepath.Join(dir, "note-add")
+	ls := filepath.Join(dir, "note-ls")
+	os.WriteFile(add, []byte("#!/bin/sh\necho \"$1|$3|$(cat)\" >> "+store+"\n"), 0o755)
+	os.WriteFile(ls, []byte("#!/bin/sh\nif [ -s "+store+" ]; then b=$(cut -d'|' -f3 "+store+"); echo \"{\\\"ok\\\":true,\\\"result\\\":{\\\"items\\\":[{\\\"id\\\":\\\"PN-0001\\\",\\\"created\\\":\\\"2026-10-07T10:00:00+02:00\\\",\\\"body\\\":\\\"$b\\\"}]}}\"; else echo '{\"ok\":true,\"result\":{\"items\":[]}}'; fi\n"), 0o755)
+	m.cfg.Notes.Ls = []string{ls, "{ref}"}
+	m.cfg.Notes.Add = []string{add, "{ref}", "x", "{sphere}"}
+	pressAdd(t, m)
+	press(t, m, "N")
+	if !m.modal.Open() || !strings.Contains(screen(m), "Note sur PE-0001") {
+		t.Fatalf("N opens the note editor:\n%s", screen(m))
+	}
+	typeText(t, m, "Copie du contrat chez le notaire")
+	press(t, m, "ctrl+s")
+	var b []byte
+	for i := 0; i < 40 && len(b) == 0; i++ {
+		time.Sleep(50 * time.Millisecond)
+		b, _ = os.ReadFile(store)
+	}
+	if string(b) != "due:PE-0001|perso|Copie du contrat chez le notaire\n" {
+		t.Fatalf("note add got %q", b)
+	}
+	drive(t, m, m.loadLedger())
+	m.Update(m.loadNotes()())
+	if s := screen(m); !strings.Contains(s, "Notes") || !strings.Contains(s, "Copie du contrat chez le notaire") {
+		t.Fatalf("the detail lists the notes:\n%s", s)
+	}
+}
+
+func pressAdd(t *testing.T, m *model) {
+	t.Helper()
+	add(t, m, "Fin du bail", "31.10.2026", "")
 }

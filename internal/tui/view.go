@@ -253,7 +253,7 @@ func (m *model) help(w int) []string {
 		sSection.Render("Registre"),
 		col("c", "nouvelle échéance"),
 		col("E", "modifier (formulaire)"),
-		col("N", "ajouter aux notes (éditeur, en fin de fichier)"),
+		col("N", "ajouter une note (gardée par l'outil note, rattachée à l'échéance)"),
 		col("e", "clore : faite"),
 		col("espace", "faite, ou rouvrir"),
 		col("z", "reporter (7d, 2w, une date)"),
@@ -494,6 +494,19 @@ func (m *model) entryDetail(it connect.Item, w int) []string {
 		out = append(out, "", " "+sSection.Render(title))
 		for _, l := range wrap(e.Body, w-3) {
 			out = append(out, "  "+sText.Render(l))
+		}
+	}
+	if len(d.Notes) > 0 {
+		out = append(out, "", " "+sSection.Render("Notes"))
+		for _, n := range d.Notes {
+			at, _ := time.Parse(time.RFC3339, n.Created)
+			for i, l := range wrap(strings.TrimSpace(n.Body), w-16) {
+				prefix := "               "
+				if i == 0 {
+					prefix = " " + sMuted.Render(at.Format("02.01 15:04")+"  ")
+				}
+				out = append(out, prefix+sText.Render(l))
+			}
 		}
 	}
 	if len(e.Log) > 0 {
