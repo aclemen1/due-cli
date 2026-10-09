@@ -19,6 +19,7 @@ due show PE-0007                               # P: perso, U: pro
 
 - A line from a connector (`source` ≠ `due`) belongs to its tool: change it there (macos, office, routine, oj, task: `task edit|done`).
 - `!` marks a late line. `errors` lists connectors that failed.
+- A line of a connector seen and settled (a late date of the memory) leaves due with `due ack <id> --sphere <s>` (its id as due ls gives it); `due unack` gives it back, `due ls --all` shows it as acked. An entry of the ledger is closed with `due done`.
 
 ## Write (ledger only)
 

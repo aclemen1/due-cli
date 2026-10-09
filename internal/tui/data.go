@@ -30,6 +30,7 @@ type (
 	ledgerMsg struct {
 		items   []connect.Item
 		details map[string]*actions.Detail
+		acks    map[string]bool // <sphere>\x00<ack key>
 		err     error
 	}
 	connMsg struct {
@@ -59,7 +60,7 @@ func (m *model) loadLedger() tea.Cmd {
 	ctx := m.ctx(map[string]any{})
 	spheres := m.spheres
 	return func() tea.Msg {
-		out := ledgerMsg{details: map[string]*actions.Detail{}}
+		out := ledgerMsg{details: map[string]*actions.Detail{}, acks: map[string]bool{}}
 		for _, sp := range spheres {
 			l, err := actions.OpenLedger(ctx, m.cfg, sp)
 			if err != nil {
@@ -68,6 +69,9 @@ func (m *model) loadLedger() tea.Cmd {
 			entries, err := l.List()
 			if err != nil {
 				return ledgerMsg{err: err}
+			}
+			for k := range l.AckSet() {
+				out.acks[sp+"\x00"+k] = true
 			}
 			for _, e := range entries {
 				d := actions.DetailOf(l, e)
@@ -173,6 +177,18 @@ func (m *model) apply() {
 			out = append(out, m.conn[k]...)
 		}
 	}
+	// Lines taken off with due ack: hidden, or shown as acked with f.
+	var unacked []connect.Item
+	for _, it := range out {
+		if it.Type != "due" && m.acks[it.Sphere+"\x00"+ledger.AckKey(it.Source, it.ID, it.At.Format(time.RFC3339))] {
+			if !m.showDone {
+				continue
+			}
+			it.State, it.Late = "acked", false
+		}
+		unacked = append(unacked, it)
+	}
+	out = unacked
 	if m.sphereOnly != "" {
 		var kept []connect.Item
 		for _, it := range out {

@@ -17,6 +17,7 @@ import (
 	"github.com/aclemen1/due-cli/internal/actions"
 	"github.com/aclemen1/due-cli/internal/config"
 	"github.com/aclemen1/due-cli/internal/connect"
+	"github.com/aclemen1/due-cli/internal/ledger"
 	"github.com/aclemen1/due-cli/internal/spec"
 	"github.com/aclemen1/due-cli/internal/watch"
 )
@@ -124,6 +125,7 @@ type model struct {
 	// data
 	ledger   []connect.Item
 	details  map[string]*actions.Detail
+	acks     map[string]bool
 	conn     map[string][]connect.Item
 	connErr  map[string]string
 	loading  map[string]bool
@@ -351,7 +353,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setStatus(msg.err.Error(), true)
 			return m, nil
 		}
-		m.ledger, m.details, m.loadedAt, m.ready = msg.items, msg.details, m.now(), true
+		m.ledger, m.details, m.acks, m.loadedAt, m.ready = msg.items, msg.details, msg.acks, m.now(), true
 		m.apply()
 		return m, m.loadNotes()
 	case notesMsg:
@@ -544,7 +546,14 @@ func (m *model) keyEntry(key string) tea.Cmd {
 		return nil
 	}
 	if it.Type != "due" {
-		m.setStatus("cette ligne vient de "+it.Source+" : elle se modifie dans "+it.Type+" (o pour l'ouvrir)", true)
+		line := map[string]any{"id": ledger.BaseID(it.ID), "source": it.Source, "sphere": it.Sphere}
+		switch {
+		case (key == "space" || key == "d") && it.State == "acked":
+			return m.act("unack", line, "ligne rendue")
+		case key == "e" || key == "space" || key == "d":
+			return m.act("ack", line, "ligne retirée (f la montre, espace la rend)")
+		}
+		m.setStatus("cette ligne vient de "+it.Source+" : elle se modifie dans "+it.Type+" (o pour l'ouvrir ; e la retire de due)", true)
 		return nil
 	}
 	ids := map[string]any{"id": it.ID, "sphere": it.Sphere}

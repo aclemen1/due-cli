@@ -40,7 +40,8 @@ func Roots(s config.Sphere, sphere string) []Root {
 	home, _ := os.UserHomeDir()
 	md := func(p string) bool { return strings.HasSuffix(p, ".md") }
 	roots := []Root{{Source: sphere + "/due", Dir: s.Root, Depth: 0, Keep: func(p string) bool {
-		return strings.HasPrefix(filepath.Base(p), "E-") && md(p)
+		b := filepath.Base(p)
+		return (strings.Contains(b, "E-") && md(p)) || b == "acks.yaml"
 	}}}
 	for _, c := range s.Connectors {
 		if c.Off {

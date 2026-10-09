@@ -54,7 +54,7 @@ func (m *model) columns() []column {
 
 func (m *model) cells(it connect.Item) []cell {
 	now := m.now()
-	done := it.Type == "due" && it.State != ledger.Open
+	done := (it.Type == "due" && it.State != ledger.Open) || it.State == "acked"
 	urg := urgency(it.At, now, it.Late)
 	if done {
 		urg = sMuted

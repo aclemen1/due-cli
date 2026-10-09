@@ -92,6 +92,19 @@ func List(cfg *config.Config, l *ledger.Ledger, q Query) (*Listing, error) {
 		}
 		out.Items = append(out.Items, r.Items...)
 	}
+	if acks := l.AckSet(); len(acks) > 0 {
+		kept := []connect.Item{}
+		for _, it := range out.Items {
+			if it.Type != "due" && acks[ledger.AckKey(it.Source, it.ID, it.At.Format(time.RFC3339))] {
+				if !q.All {
+					continue
+				}
+				it.State, it.Late = "acked", false
+			}
+			kept = append(kept, it)
+		}
+		out.Items = kept
+	}
 	if q.Search != "" {
 		needle := strings.ToLower(q.Search)
 		var kept []connect.Item
@@ -162,7 +175,7 @@ func registerList() {
 			{Name: "until", Kind: spec.String, Help: "End of the window: 7d, 30d, 2w, or a date. Defaults to the sphere's horizon (30d)."},
 			{Name: "from", Kind: spec.String, Help: "Start of the window; by default late lines are kept."},
 			{Name: "source", Kind: spec.StringList, Help: "Keep these sources: due (the ledger) or a connector's name. Repeatable."},
-			{Name: "all", Kind: spec.Bool, Help: "Keep done and dropped entries of the ledger."},
+			{Name: "all", Kind: spec.Bool, Help: "Keep done and dropped entries of the ledger, and the lines taken off with due ack (state acked)."},
 			{Name: "critical", Kind: spec.Bool, Help: "Keep the lines the judge finds critical if forgotten (due assess)."},
 			{Name: "ref", Kind: spec.String, Help: "Keep the lines of this ref, e.g. oj:RDIR-17, office:P-0040, task:PT-0007."},
 			{Name: "waiting-since", Kind: spec.String, Help: "Keep the office dossiers waiting for at least this long, e.g. 30d. Waits without a deadline are not lines of due: use office ls --waiting-since."},
