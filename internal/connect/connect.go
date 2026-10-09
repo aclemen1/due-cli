@@ -35,6 +35,8 @@ type Item struct {
 	// Critical is the judge's probability that forgetting the line costs dearly; nil until judged.
 	Critical *float64 `json:"critical,omitempty"`
 	Nature   string   `json:"nature,omitempty"` // legal, financial, irreversible, none
+	// Refs are further refs of the line (a task citing several things); Ref is the first.
+	Refs []string `json:"refs,omitempty"`
 	// Since is when an office dossier went waiting.
 	Since *time.Time `json:"waiting_since,omitempty"`
 }
@@ -558,14 +560,15 @@ func task(ctx context.Context, c config.Connector, w Window) ([]Item, error) {
 	}
 	var res struct {
 		Items []struct {
-			ID        string `json:"id"`
-			Title     string `json:"title"`
-			Who       string `json:"who"`
-			Due       string `json:"due"`
-			State     string `json:"state"`
-			WaitingOn string `json:"waiting_on"`
-			Mine      bool   `json:"mine"`
-			Ref       string `json:"ref"`
+			ID        string   `json:"id"`
+			Title     string   `json:"title"`
+			Who       string   `json:"who"`
+			Due       string   `json:"due"`
+			State     string   `json:"state"`
+			WaitingOn string   `json:"waiting_on"`
+			Mine      bool     `json:"mine"`
+			Ref       string   `json:"ref"`
+			Refs      []string `json:"refs"`
 		} `json:"items"`
 	}
 	if err := run(ctx, &res, bin(c, "task"), "ls", "--format", "json", "--sphere", sphere); err != nil {
@@ -588,19 +591,17 @@ func task(ctx context.Context, c config.Connector, w Window) ([]Item, error) {
 		if t.State == "proposed" {
 			parts = append(parts, "proposée")
 		}
-		ref := t.Ref
-		if ref == "" {
-			ref = "task:" + t.ID
-		}
-		out = append(out, Item{ID: t.ID, Title: t.Title, At: at, AllDay: isDate(t.Due), Detail: strings.Join(parts, " · "), Ref: ref})
+		ref, refs := taskRefs(t.ID, t.Ref, t.Refs)
+		out = append(out, Item{ID: t.ID, Title: t.Title, At: at, AllDay: isDate(t.Due), Detail: strings.Join(parts, " · "), Ref: ref, Refs: refs})
 	}
 	// A task set aside comes back on its day: a line « réveil » on that day.
 	var incubating struct {
 		Items []struct {
-			ID    string `json:"id"`
-			Title string `json:"title"`
-			Until string `json:"until"`
-			Ref   string `json:"ref"`
+			ID    string   `json:"id"`
+			Title string   `json:"title"`
+			Until string   `json:"until"`
+			Ref   string   `json:"ref"`
+			Refs  []string `json:"refs"`
 		} `json:"items"`
 	}
 	if err := run(ctx, &incubating, bin(c, "task"), "ls", "--format", "json", "--sphere", sphere, "--state", "incubating"); err != nil {
@@ -611,11 +612,20 @@ func task(ctx context.Context, c config.Connector, w Window) ([]Item, error) {
 		if t.Until == "" || !ok {
 			continue
 		}
-		ref := t.Ref
-		if ref == "" {
-			ref = "task:" + t.ID
-		}
-		out = append(out, Item{ID: t.ID + "@wake", Title: "réveil : " + t.Title, At: at, AllDay: isDate(t.Until), Detail: "mise de côté", Ref: ref})
+		ref, refs := taskRefs(t.ID, t.Ref, t.Refs)
+		out = append(out, Item{ID: t.ID + "@wake", Title: "réveil : " + t.Title, At: at, AllDay: isDate(t.Until), Detail: "mise de côté", Ref: ref, Refs: refs})
 	}
 	return out, nil
+}
+
+// taskRefs: a task's refs (refs, or the older ref), the first as the line's
+// ref, the task itself when it cites nothing; the others kept for --ref.
+func taskRefs(id, ref string, refs []string) (string, []string) {
+	if len(refs) == 0 && ref != "" {
+		refs = []string{ref}
+	}
+	if len(refs) == 0 {
+		return "task:" + id, nil
+	}
+	return refs[0], append(refs[1:], "task:"+id)
 }

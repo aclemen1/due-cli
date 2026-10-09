@@ -99,7 +99,7 @@ func TestTaskConnector(t *testing.T) {
 case "$*" in *incubating*) echo '{"ok":true,"result":{"items":[{"id":"UT-0009","title":"Relancer le fournisseur","state":"incubating","until":"2026-10-20"},{"id":"UT-0010","title":"Un jour","state":"incubating"}]}}'; exit;; esac
 echo '{"ok":true,"result":{"items":[
  {"id":"UT-0001","title":"Propositions d économies","who":"Alain","due":"2026-10-09","state":"open","mine":true},
- {"id":"UT-0002","title":"Offre Camptocamp","who":"Marc","due":"2026-10-12T14:00","state":"waiting","waiting_on":"Camptocamp","mine":false,"ref":"office:U-0002"},
+ {"id":"UT-0002","title":"Offre Camptocamp","who":"Marc","due":"2026-10-12T14:00","state":"waiting","waiting_on":"Camptocamp","mine":false,"refs":["office:U-0002","oj:RDIR-3"]},
  {"id":"UT-0003","title":"Sans date","state":"open","mine":true}],"counts":{}}}'
 `
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
@@ -110,7 +110,7 @@ echo '{"ok":true,"result":{"items":[
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 3 || !items[0].AllDay || items[0].Ref != "task:UT-0001" || items[1].Detail != "Marc · attend Camptocamp" || items[1].Ref != "office:U-0002" ||
+	if len(items) != 3 || !items[0].AllDay || items[0].Ref != "task:UT-0001" || items[1].Detail != "Marc · attend Camptocamp" || items[1].Ref != "office:U-0002" || len(items[1].Refs) != 2 || items[1].Refs[0] != "oj:RDIR-3" ||
 		items[2].Title != "réveil : Relancer le fournisseur" || items[2].ID != "UT-0009@wake" {
 		t.Fatalf("got %+v", items)
 	}

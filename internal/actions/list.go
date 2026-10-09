@@ -296,7 +296,11 @@ func ListAll(ctx *spec.Context, cfg *config.Config, spheres []string, q Query) (
 	if q.Ref != "" {
 		kept := []connect.Item{}
 		for _, it := range out.Items {
-			if strings.EqualFold(it.Ref, q.Ref) {
+			ok := strings.EqualFold(it.Ref, q.Ref)
+			for _, r := range it.Refs {
+				ok = ok || strings.EqualFold(r, q.Ref)
+			}
+			if ok {
 				kept = append(kept, it)
 			}
 		}
