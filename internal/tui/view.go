@@ -114,8 +114,8 @@ func (m *model) header(w int) []string {
 	}
 	left += sMuted.Render("  ") + strings.Join(facts, sMuted.Render(" · "))
 	right := ""
-	if m.busy() {
-		right = sWarn.Render(spinner[m.spin%len(spinner)]) + sMuted.Render(" lecture")
+	if b := m.busy.View(); b != "" {
+		right = b // the jobs under way, their end, a failure not yet read (!)
 	} else if !m.loadedAt.IsZero() {
 		right = sMuted.Render("à jour " + ago(m.loadedAt, m.now()))
 	}
@@ -126,6 +126,10 @@ func (m *model) header(w int) []string {
 		right = sWarn.Render("nouvelle version") + sMuted.Render(" · ") + right
 	}
 	right += sMuted.Render(" · " + Build())
+	// The left gives way so the jobs stay in sight.
+	if room := w - ansi.StringWidth(right) - 1; ansi.StringWidth(left) > room {
+		left = ansi.Truncate(left, max(room, 0), "…")
+	}
 	gap := w - ansi.StringWidth(left) - ansi.StringWidth(right)
 	line1 := left + strings.Repeat(" ", max(1, gap)) + right
 
@@ -214,14 +218,18 @@ func (m *model) footer(w int) string {
 	if m.helpOn {
 		return helpLine("esc", "fermer l'aide", "q", "quitter")
 	}
+	var failed []string
+	if m.busy.Unread() > 0 {
+		failed = []string{"!", "voir l'échec"}
+	}
 	it, ok := m.current()
 	switch {
 	case ok && it.Type == "due":
-		return helpLine("c", "nouvelle", "E", "modifier", "espace", "faite", "z", "reporter", "x", "abandonner", "R", "exécuter", "/", "filtrer", "?", "aide", "q", "quitter")
+		return helpLine(append(failed, "c", "nouvelle", "E", "modifier", "espace", "faite", "z", "reporter", "x", "abandonner", "R", "exécuter", "/", "filtrer", "?", "aide", "q", "quitter")...)
 	case ok && it.Type == "office":
-		return helpLine("c", "nouvelle", "o", "ouvrir le dossier", "1-9", "vues", "s", "sphère", "esc", "registre", "/", "filtrer", "?", "aide", "q", "quitter")
+		return helpLine(append(failed, "c", "nouvelle", "o", "ouvrir le dossier", "1-9", "vues", "s", "sphère", "esc", "registre", "/", "filtrer", "?", "aide", "q", "quitter")...)
 	default:
-		return helpLine("c", "nouvelle", "1-9", "vues", "s", "sphère", "!", "critiques", "t", "trier", "esc", "registre", "/", "filtrer", "?", "aide", "q", "quitter")
+		return helpLine(append(failed, "c", "nouvelle", "1-9", "vues", "s", "sphère", "g c", "critiques", "t", "trier", "esc", "registre", "/", "filtrer", "?", "aide", "q", "quitter")...)
 	}
 }
 
@@ -244,11 +252,12 @@ func (m *model) help(w int) []string {
 		col("s", "sphère : toutes, puis chacune seule"),
 		col("t  T", "trier (date, titre, source), inverser le tri"),
 		col("/", "filtrer sur le titre et le détail"),
-		col("!", "lignes critiques seulement (conséquences juridiques, financières, irréversibles)"),
+		col("g c", "lignes critiques seulement (conséquences juridiques, financières, irréversibles)"),
 		col("f", "montrer aussi les échéances faites et abandonnées"),
 		col("H", "horizon des vues toutes et sources : 7, 30, 90, 365 jours"),
 		col("tab", "montrer ou masquer le détail"),
 		col("r", "relire toutes les sources"),
+		col("!", "travaux de fond : en cours, finis, échecs"),
 		"",
 		sSection.Render("Registre"),
 		col("c", "nouvelle échéance"),

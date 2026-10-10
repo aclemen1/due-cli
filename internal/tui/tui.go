@@ -162,9 +162,11 @@ type model struct {
 	target  connect.Item    // the line a snooze or a confirmation is about
 
 	w, h      int
-	status    string
+	status    string // what the last key did, not a job: jobs go to busy
 	statusErr bool
 	statusAt  time.Time
+	busy      *tuikit.Busy // the background jobs (busy.go)
+	after     *afterJobs
 	saved     []byte // the state last written
 
 	// reload after a rebuild or SIGUSR1, once at rest
@@ -184,7 +186,7 @@ func newModel(cfgPath string, cfg *config.Config, spheres []string) *model {
 	in.Prompt = ""
 	m := &model{cfgPath: cfgPath, cfg: cfg, spheres: spheres, now: actions.Now, input: in, w: 100, h: 30, horizon: 1,
 		detailOn: true, details: map[string]*actions.Detail{}, conn: map[string][]connect.Item{},
-		connErr: map[string]string{}, loading: map[string]bool{}}
+		connErr: map[string]string{}, loading: map[string]bool{}, busy: tuikit.NewBusy(), after: &afterJobs{}}
 	for i, x := range horizons {
 		if x == cfg.Spheres[spheres[0]].Horizon {
 			m.horizon = i
@@ -295,10 +297,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if cmd, ok := m.busyUpdate(msg); ok {
+		return m, cmd
+	}
 	// An open modal takes every key, paste and click: no shortcut of the TUI fires.
 	if m.modal.Open() {
 		switch msg.(type) {
-		case tickMsg, pollMsg, watchMsg, ledgerMsg, connMsg, doneMsg, notesMsg, macosMsg, binCheckMsg, signalMsg,
+		case tickMsg, pollMsg, watchMsg, ledgerMsg, connMsg, doneMsg, notesMsg, macosMsg, binCheckMsg, signalMsg, error,
 			tuikit.DoneMsg, tuikit.CancelMsg, tea.BackgroundColorMsg, tea.WindowSizeMsg:
 		default:
 			return m, m.modal.Update(msg)
@@ -376,6 +381,12 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				d.Notes = notes
 			}
 		}
+	case loadFail:
+		if msg.name == "due" {
+			m.loading["due"] = false
+			return m, nil
+		}
+		return m.update(connMsg{name: msg.name, err: msg.err})
 	case connMsg:
 		m.loading[msg.name] = false
 		if msg.err != nil {
@@ -388,17 +399,11 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.apply()
 		return m, m.trySelect()
 	case doneMsg:
-		if msg.err != nil {
-			m.setStatus(msg.err.Error(), true)
-			return m, nil
-		}
-		if msg.status != "" {
-			m.setStatus(msg.status, false)
-		}
+		// The end of the job shows in busy: the ledger is read again quietly, so it stays.
 		if msg.select_ != "" {
 			m.selKey = msg.select_
 		}
-		return m, m.loadLedger()
+		return m, m.readLedger()
 	case tea.MouseMsg:
 		if !m.modal.Open() && m.prompt == pNone {
 			return m, m.mouse(msg)
@@ -443,6 +448,15 @@ func (m *model) setView(i int) tea.Cmd {
 func (m *model) keyList(k tea.KeyPressMsg) tea.Cmd {
 	page := max(1, m.listH-2)
 	s := k.String()
+	if m.pendingG && s == "c" {
+		m.pendingG = false
+		m.critOnly = !m.critOnly
+		m.apply()
+		if m.critOnly {
+			m.setStatus("lignes critiques seulement (g c pour tout revoir)", false)
+		}
+		return nil
+	}
 	if s != "g" {
 		m.pendingG = false
 	}
@@ -516,12 +530,8 @@ func (m *model) keyList(k tea.KeyPressMsg) tea.Cmd {
 			m.setStatus("horizon "+horizons[m.horizon]+" (vue toutes et connecteurs)", false)
 		}
 		return m.loadAll()
-	case "!":
-		m.critOnly = !m.critOnly
-		m.apply()
-		if m.critOnly {
-			m.setStatus("lignes critiques seulement (! pour tout revoir)", false)
-		}
+	case tuikit.BusyKey:
+		m.openBusy()
 	case "f":
 		m.showDone = !m.showDone
 		return m.loadLedger()
@@ -669,17 +679,17 @@ func (m *model) open(it connect.Item) tea.Cmd {
 		for _, c := range m.connectors() {
 			if c.c.Name == it.Source && c.sphere == it.Sphere {
 				dir := c.c.Office
-				return func() tea.Msg {
+				return m.run("ouvrir "+it.ID+" dans office", func() (string, tea.Msg, error) {
 					args := []string{"goto", it.ID}
 					if dir != "" {
 						args = append(args, "--office", dir)
 					}
 					out, err := exec.Command("office", args...).CombinedOutput()
 					if err != nil {
-						return doneMsg{err: errorf("office goto %s : %s", it.ID, strings.TrimSpace(string(out)))}
+						return "", nil, errorf("office goto %s : %s", it.ID, strings.TrimSpace(string(out)))
 					}
-					return doneMsg{status: "dossier " + it.ID + " ouvert"}
-				}
+					return "dossier " + it.ID + " ouvert", nil, nil
+				})
 			}
 		}
 	}
@@ -814,7 +824,7 @@ func (m *model) trySelect() tea.Cmd {
 			}
 		}
 	}
-	if m.busy() {
+	if m.reading() {
 		return nil
 	}
 	if m.horizon < len(horizons)-1 && len(m.connectors()) > 0 {

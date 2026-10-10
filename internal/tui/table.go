@@ -178,7 +178,7 @@ func (m *model) list(w, h, top int) []string {
 	m.rowItem = nil
 	if len(m.items) == 0 {
 		switch {
-		case !m.ready || (m.busy() && !m.ledgerOnly()):
+		case !m.ready || (m.reading() && !m.ledgerOnly()):
 			return []string{"  " + sMuted.Render(spinner[m.spin%len(spinner)]+" lecture des sources…")}
 		case m.filter != "":
 			return []string{"", "  " + sMuted.Render("Rien ne correspond à « "+m.filter+" ». esc efface le filtre.")}

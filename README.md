@@ -70,10 +70,12 @@ watched; reminders and calendars follow `macos watch` (read again every minute
 when it is not running).
 
 Keys follow the ecosystem convention: `j k` · `gg G` · `[ ]` groups · `enter l` open ·
-`esc h` back · `1`–`9` views · `s` sphere · `t T` sort · `/` filter · `!` critical ·
+`esc h` back · `1`–`9` views · `s` sphere · `t T` sort · `/` filter · `g c` critical ·
 `c` new · `E` edit · `N` notes (end of file) · `e` close · `space` done/reopen ·
 `z` snooze · `R` run now · `x` drop · `#` delete · `o` open · `f` done too ·
-`H` horizon · `tab` detail · `r` read again · `?` help · `q` quit.
+`H` horizon · `tab` detail · `r` read again · `!` background jobs · `?` help · `q` quit.
+Reads, writes and `office goto` run in the background: the header shows them while
+they run, their end a few seconds, a failure in red until `!` opens the list of jobs.
 Mouse: click to select, wheel to scroll.
 
 ## License

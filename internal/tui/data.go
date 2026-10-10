@@ -39,9 +39,7 @@ type (
 		err   error
 	}
 	doneMsg struct {
-		status  string
 		select_ string // an entry to select once the ledger is read again
-		err     error
 	}
 )
 
@@ -54,8 +52,20 @@ func waitWatch(w *watch.Watcher) tea.Cmd {
 	return func() tea.Msg { return watchMsg{<-w.C} }
 }
 
-// loadLedger reads every entry of the ledgers, with its detail; ids are unique across spheres.
+// loadLedger reads the ledgers under Busy.
 func (m *model) loadLedger() tea.Cmd {
+	read := m.readLedger()
+	return m.busy.Wrap("relecture du registre", func() tea.Msg {
+		msg := read()
+		if l, ok := msg.(ledgerMsg); ok && l.err != nil {
+			return loadFail{name: "due", err: l.err}
+		}
+		return msg
+	})
+}
+
+// readLedger reads every entry of the ledgers, with its detail; ids are unique across spheres.
+func (m *model) readLedger() tea.Cmd {
 	m.loading["due"] = true
 	ctx := m.ctx(map[string]any{})
 	spheres := m.spheres
@@ -100,14 +110,26 @@ func (m *model) loadConn(key string) tea.Cmd {
 	now := m.now()
 	until, _ := when.Horizon(horizons[m.horizon], now, m.cfg.DefaultTime)
 	w := connect.Window{Until: until, Now: now, Sphere: c.sphere}
-	return func() tea.Msg {
+	label := "relecture " + c.c.Name
+	if m.multi() {
+		label = "relecture " + key
+	}
+	prev := m.connErr[key] // the failure already shown for this source, if any
+	return m.busy.Wrap(label, func() tea.Msg {
 		items, err := connect.One(c.c, w)
+		if err != nil {
+			// A failure shows once per outage: the same error again only keeps the source counted in error.
+			if err.Error() == prev {
+				return connMsg{name: key, err: err}
+			}
+			return loadFail{name: key, err: err}
+		}
 		for i := range items {
 			items[i].Sphere = c.sphere
 		}
 		judge.Annotate(items)
-		return connMsg{name: key, items: items, err: err}
-	}
+		return connMsg{name: key, items: items}
+	})
 }
 
 func (m *model) loadAll() tea.Cmd {
@@ -119,7 +141,8 @@ func (m *model) loadAll() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func (m *model) busy() bool {
+// reading: a read of the ledger or of a source is under way.
+func (m *model) reading() bool {
 	for _, b := range m.loading {
 		if b {
 			return true
@@ -128,27 +151,37 @@ func (m *model) busy() bool {
 	return false
 }
 
-// act runs an action of the ledger, as `due <name>` would; args carry the sphere it writes to.
+// actLabels name the job of an action, by the id of its line.
+var actLabels = map[string]string{"ack": "retirer la ligne", "unack": "rendre la ligne", "done": "clore", "reopen": "rouvrir",
+	"edit": "modifier", "snooze": "reporter", "drop": "abandonner", "run": "exécuter", "rm": "supprimer"}
+
+// act runs an action of the ledger under Busy, as `due <name>` would; args carry the sphere it
+// writes to; status is the end shown.
 func (m *model) act(name string, args map[string]any, status string) tea.Cmd {
-	return func() tea.Msg {
+	label := actLabels[name] + " " + fmt.Sprint(args["id"])
+	if name == "add" {
+		label = "ajouter « " + fmt.Sprint(args["title"]) + " »"
+	}
+	cfgPath := m.cfgPath
+	return m.run(label, func() (string, tea.Msg, error) {
 		a := spec.Find("due", name)
 		parsed, err := spec.ArgsFrom(a, args)
 		if err != nil {
-			return doneMsg{err: err}
+			return "", nil, err
 		}
-		res, err := a.Run(&spec.Context{Args: parsed, Config: m.cfgPath, Format: "json"})
+		res, err := a.Run(&spec.Context{Args: parsed, Config: cfgPath, Format: "json"})
 		if err != nil {
-			return doneMsg{err: err}
+			return "", nil, err
 		}
-		out := doneMsg{status: status}
+		out, text := doneMsg{}, status
 		switch r := res.(type) {
 		case trigger.Fired:
-			out.status += " : " + r.Result
+			text += " : " + r.Result
 		case *ledger.Entry:
 			out.select_ = fmt.Sprint(args["sphere"]) + "\x00due\x00" + r.ID
 		}
-		return out
-	}
+		return text, out, nil
+	})
 }
 
 // apply rebuilds the visible lines from the data, keeping the selection.
@@ -253,7 +286,7 @@ func (m *model) apply() {
 			sel = i
 		}
 	}
-	if sel < 0 && m.selKey != "" && m.busy() {
+	if sel < 0 && m.selKey != "" && m.reading() {
 		// The remembered line may be in a source still loading: wait for it.
 		m.sel = max(0, min(m.sel, len(out)-1))
 		return

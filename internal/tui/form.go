@@ -195,12 +195,12 @@ func (m *model) done(msg tuikit.DoneMsg) tea.Cmd {
 		if text == "" {
 			return nil
 		}
-		return func() tea.Msg {
+		return m.run("noter sur "+it.ID, func() (string, tea.Msg, error) {
 			if err := actions.AddNote(cfg, "due:"+it.ID, it.Sphere, text); err != nil {
-				return doneMsg{err: err}
+				return "", nil, err
 			}
-			return doneMsg{status: "note ajoutée à " + it.ID}
-		}
+			return "note ajoutée à " + it.ID, doneMsg{}, nil
+		})
 	}
 	return nil
 }

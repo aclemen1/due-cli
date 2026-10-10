@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,9 +38,14 @@ func drive(t *testing.T, m *model, cmd tea.Cmd) {
 		for _, c := range msg {
 			drive(t, m, c)
 		}
-	case ledgerMsg, connMsg, doneMsg, notesMsg, tuikit.DoneMsg, tuikit.CancelMsg:
+	case ledgerMsg, connMsg, doneMsg, notesMsg, loadFail, error, tuikit.DoneMsg, tuikit.CancelMsg:
 		_, next := m.Update(msg)
 		drive(t, m, next)
+	default:
+		if strings.HasPrefix(fmt.Sprintf("%T", msg), "tuikit.busyDone") {
+			_, next := m.Update(msg)
+			drive(t, m, next)
+		}
 	}
 }
 
@@ -313,8 +320,13 @@ func TestStateSurvivesARestart(t *testing.T) {
 	press(t, m, "k") // select the first entry
 	press(t, m, "tab")
 	press(t, m, "f")
-	press(t, m, "!")
-	press(t, m, "!")
+	press(t, m, "g")
+	press(t, m, "c")
+	if !m.critOnly || m.modal.Open() {
+		t.Fatalf("g c shows the critical lines only, and opens no form")
+	}
+	press(t, m, "g")
+	press(t, m, "c")
 	_, _ = m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}) // ctrl+c, not q
 
 	again := newModel(m.cfgPath, m.cfg, m.spheres)
@@ -422,5 +434,104 @@ func TestSelectOpensOnTheLine(t *testing.T) {
 	drive(t, unknown, unknown.loadLedger())
 	if unknown.pendingSelect != "" || !strings.Contains(screen(unknown), "introuvable") {
 		t.Fatalf("an unknown id gives a message:\n%s", screen(unknown))
+	}
+}
+
+func TestBusyShowsJobs(t *testing.T) {
+	m := setup(t)
+	release := make(chan struct{})
+	cmd := m.run("relecture agenda", func() (string, tea.Msg, error) {
+		<-release
+		return "", nil, nil
+	})
+	if !strings.Contains(screen(m), "relecture agenda") {
+		t.Fatalf("a job under way shows in the header:\n%s", screen(m))
+	}
+	close(release)
+	drive(t, m, cmd)
+
+	add(t, m, "Passeport", "01.12.2026", "")
+	if !strings.Contains(screen(m), "✓ échéance ajoutée") || len(m.items) != 1 {
+		t.Fatalf("the end of a write shows in the header:\n%s", screen(m))
+	}
+
+	drive(t, m, m.run("ouvrir P-0019 dans office", func() (string, tea.Msg, error) {
+		return "", nil, errors.New("office goto P-0019 : dossier inconnu")
+	}))
+	if !strings.Contains(screen(m), "✗ ouvrir P-0019 dans office") || !strings.Contains(screen(m), "! voir l'échec") {
+		t.Fatalf("a failure shows in red, with the key of the list:\n%s", screen(m))
+	}
+	press(t, m, "j")
+	if !strings.Contains(screen(m), "✗ ouvrir P-0019") {
+		t.Fatalf("the failure stays after other keys:\n%s", screen(m))
+	}
+	press(t, m, "!")
+	if !m.modal.Open() || !strings.Contains(screen(m), "Travaux") || !strings.Contains(screen(m), "dossier inconnu") {
+		t.Fatalf("! opens the list of the jobs:\n%s", screen(m))
+	}
+	press(t, m, "esc")
+	if m.modal.Open() || strings.Contains(screen(m), "✗ ouvrir") {
+		t.Fatalf("once read, the failure leaves the header:\n%s", screen(m))
+	}
+}
+
+func TestBangIsTypedInAForm(t *testing.T) {
+	m := setup(t)
+	press(t, m, "c")
+	press(t, m, "!")
+	if c, ok := m.modal.Content().(interface{ ID() string }); !ok || c.ID() == "busy" {
+		t.Fatal("! in a form is a character, not the list of jobs")
+	}
+}
+
+func TestSourceFailureShowsOncePerOutage(t *testing.T) {
+	m := setup(t)
+	dir := t.TempDir()
+	state := filepath.Join(dir, "state")
+	script := filepath.Join(dir, "source.sh")
+	os.WriteFile(script, []byte("#!/bin/sh\ns=$(cat "+state+")\n[ \"$s\" = ok ] && { echo '[]'; exit 0; }\necho \"$s\" >&2\nexit 1\n"), 0o755)
+	sp := m.cfg.Spheres["perso"]
+	sp.Connectors = []config.Connector{{Name: "ext", Type: "command", Run: []string{script}}}
+	m.cfg.Spheres["perso"] = sp
+	read := func(s string) int {
+		t.Helper()
+		os.WriteFile(state, []byte(s), 0o644)
+		settle(t, m, m.loadConn("perso/ext"))
+		return m.busy.Unread()
+	}
+	if n := read("panne A"); n != 1 || m.connErr["perso/ext"] == "" {
+		t.Fatalf("a source that fails shows one failure: %d %v", n, m.connErr)
+	}
+	if n := read("panne A"); n != 1 || len(m.connErr) != 1 {
+		t.Fatalf("the same error again shows nothing more: %d %v", n, m.connErr)
+	}
+	if n := read("panne B"); n != 2 {
+		t.Fatalf("another error shows a second failure: %d", n)
+	}
+	if n := read("ok"); n != 2 || len(m.connErr) != 0 {
+		t.Fatalf("a source back is no longer in error: %d %v", n, m.connErr)
+	}
+	if n := read("panne B"); n != 3 {
+		t.Fatalf("a relapse shows a new failure: %d", n)
+	}
+}
+
+// settle runs a read to its end, however slow, and feeds its messages back; Busy's timer is left out.
+func settle(t *testing.T, m *model, cmd tea.Cmd) {
+	t.Helper()
+	if cmd == nil {
+		return
+	}
+	switch msg := cmd().(type) {
+	case tea.BatchMsg:
+		for _, c := range msg {
+			settle(t, m, c)
+		}
+	default:
+		if strings.Contains(fmt.Sprintf("%T", msg), "busyTick") {
+			return
+		}
+		_, next := m.Update(msg)
+		drive(t, m, next)
 	}
 }
