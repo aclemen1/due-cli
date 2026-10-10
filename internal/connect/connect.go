@@ -554,6 +554,9 @@ func command(ctx context.Context, c config.Connector, w Window) ([]Item, error) 
 		if allDay {
 			past = endOfDay(t).Before(w.Now)
 		}
+		if len(c.Kinds) > 0 && !containsFold(c.Kinds, l.Kind) {
+			continue
+		}
 		if past && len(c.PastKinds) > 0 && !containsFold(c.PastKinds, l.Kind) {
 			continue
 		}

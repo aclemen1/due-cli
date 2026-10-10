@@ -132,6 +132,7 @@ type Connector struct {
 	Frequent     bool     `yaml:"frequent,omitempty"`      // routine: keep minutely and hourly routines
 	Run          []string `yaml:"run,omitempty"`           // command: argv with {from}, {until}, {sphere}
 	PastKinds    []string `yaml:"past_kinds,omitempty"`    // command: past lines kept only for these kinds
+	Kinds        []string `yaml:"kinds,omitempty"`         // command: only lines of these kinds, past or to come
 	// HideCited hides the lines another tool cites: Run lists its items (refs[]),
 	// Prefix is the scheme of this connector's refs there (mnemo:).
 	HideCited *HideCited `yaml:"hide_cited,omitempty"`

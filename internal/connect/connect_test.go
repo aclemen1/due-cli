@@ -138,3 +138,20 @@ echo '{"ok":true,"result":{"items":[{"id":"PT-0121","refs":["mnemo:01A#0","mnemo
 		t.Fatalf("only the cited date is hidden, not its record: %+v", items)
 	}
 }
+
+func TestCommandKinds(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "dates")
+	os.WriteFile(script, []byte(`#!/bin/sh
+echo '{"ok":true,"result":[
+ {"id":"a","title":"Fin du bail","at":"2026-10-31","kind":"contract"},
+ {"id":"b","title":"Payer la facture","at":"2026-10-20","kind":"payment"},
+ {"id":"c","title":"Contrôle","at":"2026-10-15","kind":"appointment"}]}'
+`), 0o755)
+	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.Local)
+	items, err := One(config.Connector{Name: "mnemo", Type: "command", Run: []string{script}, Kinds: []string{"contract", "legal", "warranty", "renewal"}},
+		Window{Until: now.AddDate(0, 0, 30), Now: now})
+	if err != nil || len(items) != 1 || items[0].ID != "a" {
+		t.Fatalf("only the kinds named are kept: %+v %v", items, err)
+	}
+}
