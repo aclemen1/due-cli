@@ -19,7 +19,11 @@ type Config struct {
 	Spheres     map[string]Sphere `yaml:"spheres"`
 	Judge       Judge             `yaml:"judge,omitempty"`
 	Notes       Notes             `yaml:"notes,omitempty"`
-	Refs        RefSources        `yaml:"refs,omitempty"`
+	// Complete names, per field, the shared sources of the TUIs' completion
+	// (~/.config/tuikit/refs.yaml): complete: {refs: [office, contact]}.
+	Complete map[string][]string `yaml:"complete,omitempty"`
+	// Refs is the older form, still read: its sources, and due's own.
+	Refs RefSources `yaml:"refs,omitempty"`
 
 	path string
 }
@@ -27,6 +31,9 @@ type Config struct {
 // RefSources propose refs to cite (contacts, …) to the TUI's completion:
 // Run prints a JSON list; Value and Label name its fields; Prefix makes the ref.
 type RefSources struct {
+	// Sources are named in the shared file of the TUIs (tuikit/complete).
+	Sources []string `yaml:"sources,omitempty"`
+	// Complete adds sources of due's own, in the same shape.
 	Complete []RefSource `yaml:"complete,omitempty"`
 }
 

@@ -2,12 +2,14 @@ package tui
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/aclemen1/tuikit"
+	"github.com/aclemen1/tuikit/complete"
+
+	"github.com/aclemen1/due-cli/internal/config"
 
 	"github.com/aclemen1/due-cli/internal/actions"
 	"github.com/aclemen1/due-cli/internal/connect"
@@ -86,37 +88,40 @@ func durations(ds []time.Duration) string {
 	return strings.Join(out, ",")
 }
 
-// refs completes a reference from the lines known to the TUI.
+// refs completes a reference from the sources of the configuration: those
+// shared by the TUIs, then due's own.
 func (m *model) refs(q string) []tuikit.Item {
-	q = strings.ToLower(strings.TrimSpace(q))
 	seen := map[string]bool{}
 	var out []tuikit.Item
-	add := func(value, label string) {
-		if value == "" || seen[value] {
-			return
-		}
-		if q != "" && !strings.Contains(strings.ToLower(value+" "+label), q) {
-			return
-		}
-		seen[value] = true
-		out = append(out, tuikit.Item{Value: value, Label: label})
-	}
-	for _, it := range m.ledger {
-		add("due:"+it.ID, it.Title)
-	}
-	for _, it := range m.extraRefs {
-		add(it.Value, it.Label)
-	}
-	for _, items := range m.conn {
-		for _, it := range items {
-			if it.Type == "office" || it.Type == "task" {
-				add(it.Ref, it.Title)
+	for _, c := range m.completers {
+		for _, it := range c.Complete(q) {
+			if !seen[it.Value] {
+				seen[it.Value] = true
+				out = append(out, it)
 			}
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Value < out[j].Value })
 	if len(out) > 30 {
 		out = out[:30]
+	}
+	return out
+}
+
+// newCompleters starts the sources of the configuration in the background.
+func newCompleters(cfg *config.Config) []*complete.Completer {
+	var out []*complete.Completer
+	names := append(append([]string{}, cfg.Complete["refs"]...), cfg.Refs.Sources...)
+	if len(names) > 0 {
+		if c, err := complete.Load(names...); err == nil {
+			out = append(out, c)
+		}
+	}
+	var own []complete.Source
+	for _, s := range cfg.Refs.Complete {
+		own = append(own, complete.Source{Run: s.Run, Prefix: s.Prefix, Value: s.Value, Label: s.Label})
+	}
+	if len(own) > 0 {
+		out = append(out, complete.New(own...))
 	}
 	return out
 }
@@ -206,23 +211,4 @@ func (m *model) openConfirm(id string, it connect.Item, question string) {
 func (m *model) openConfirmRm(it connect.Item) {
 	m.target = it
 	m.openModal("Supprimer", tuikit.NewConfirmTyped("rm", "Supprimer définitivement « "+it.Title+" » ? Recopiez son id.", it.ID))
-}
-
-type extraRefsMsg []tuikit.Item
-
-// loadExtraRefs reads the refs proposed by the configuration (contacts, …).
-func (m *model) loadExtraRefs() tea.Cmd {
-	srcs := m.cfg.Refs.Complete
-	if len(srcs) == 0 {
-		return nil
-	}
-	return func() tea.Msg {
-		var out extraRefsMsg
-		for _, s := range srcs {
-			for _, it := range actions.RefItems(s) {
-				out = append(out, tuikit.Item{Value: it[0], Label: it[1]})
-			}
-		}
-		return out
-	}
 }

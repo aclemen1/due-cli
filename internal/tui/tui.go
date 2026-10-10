@@ -15,6 +15,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/aclemen1/tuikit"
+	"github.com/aclemen1/tuikit/complete"
 
 	"github.com/aclemen1/due-cli/internal/actions"
 	"github.com/aclemen1/due-cli/internal/config"
@@ -44,6 +45,7 @@ func init() {
 				return nil, err
 			}
 			m := newModel(ctx.Config, cfg, spheres)
+			m.completers = newCompleters(cfg)
 			var roots []watch.Root
 			for _, sp := range spheres {
 				roots = append(roots, watch.Roots(cfg.Spheres[sp], sp)...)
@@ -130,16 +132,16 @@ type model struct {
 	helpOn        bool
 
 	// data
-	ledger    []connect.Item
-	details   map[string]*actions.Detail
-	acks      map[string]bool
-	extraRefs []tuikit.Item // refs proposed by the configuration (contacts)
-	conn      map[string][]connect.Item
-	connErr   map[string]string
-	loading   map[string]bool
-	loadedAt  time.Time
-	lastFull  time.Time
-	ready     bool
+	ledger     []connect.Item
+	details    map[string]*actions.Detail
+	acks       map[string]bool
+	completers []*complete.Completer // refs proposed to the Réfs field
+	conn       map[string][]connect.Item
+	connErr    map[string]string
+	loading    map[string]bool
+	loadedAt   time.Time
+	lastFull   time.Time
+	ready      bool
 
 	// list
 	items   []connect.Item
@@ -241,7 +243,7 @@ func (m *model) ctx(args map[string]any) *spec.Context {
 }
 
 func (m *model) Init() tea.Cmd {
-	cmds := []tea.Cmd{tea.RequestBackgroundColor, m.loadLedger(), m.loadAll(), tick(), poll(), checkBin(), m.loadExtraRefs()}
+	cmds := []tea.Cmd{tea.RequestBackgroundColor, m.loadLedger(), m.loadAll(), tick(), poll(), checkBin()}
 	if m.signals != nil {
 		cmds = append(cmds, waitSignal(m.signals))
 	}
@@ -292,7 +294,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// An open modal takes every key, paste and click: no shortcut of the TUI fires.
 	if m.modal.Open() {
 		switch msg.(type) {
-		case tickMsg, pollMsg, watchMsg, ledgerMsg, connMsg, doneMsg, notesMsg, extraRefsMsg, macosMsg, binCheckMsg, signalMsg,
+		case tickMsg, pollMsg, watchMsg, ledgerMsg, connMsg, doneMsg, notesMsg, macosMsg, binCheckMsg, signalMsg,
 			tuikit.DoneMsg, tuikit.CancelMsg, tea.BackgroundColorMsg, tea.WindowSizeMsg:
 		default:
 			return m, m.modal.Update(msg)
@@ -364,8 +366,6 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ledger, m.details, m.acks, m.loadedAt, m.ready = msg.items, msg.details, msg.acks, m.now(), true
 		m.apply()
 		return m, tea.Batch(m.loadNotes(), m.trySelect())
-	case extraRefsMsg:
-		m.extraRefs = msg
 	case notesMsg:
 		for id, notes := range msg {
 			if d := m.details[id]; d != nil {
