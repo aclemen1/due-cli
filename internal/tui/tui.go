@@ -45,7 +45,11 @@ func init() {
 				return nil, err
 			}
 			m := newModel(ctx.Config, cfg, spheres)
-			m.completers = newCompleters(cfg)
+			var missing []string
+			m.completers, missing = newCompleters(cfg)
+			if len(missing) > 0 {
+				m.setStatus("complétion des réfs : source(s) absente(s) de refs.yaml : "+strings.Join(missing, ", "), true)
+			}
 			var roots []watch.Root
 			for _, sp := range spheres {
 				roots = append(roots, watch.Roots(cfg.Spheres[sp], sp)...)

@@ -107,14 +107,23 @@ func (m *model) refs(q string) []tuikit.Item {
 	return out
 }
 
-// newCompleters starts the sources of the configuration in the background.
-func newCompleters(cfg *config.Config) []*complete.Completer {
+// newCompleters starts the sources of the configuration in the background and
+// names those missing from the shared file.
+func newCompleters(cfg *config.Config) ([]*complete.Completer, []string) {
 	var out []*complete.Completer
+	var missing []string
 	names := append(append([]string{}, cfg.Complete["refs"]...), cfg.Refs.Sources...)
 	if len(names) > 0 {
-		if c, err := complete.Load(names...); err == nil {
+		// A source missing from the shared file leaves the others working.
+		var uses complete.Uses
+		for _, n := range names {
+			uses = append(uses, complete.Use{Source: n})
+		}
+		c, absent := complete.FromConfig(uses)
+		if c != nil {
 			out = append(out, c)
 		}
+		missing = absent
 	}
 	var own []complete.Source
 	for _, s := range cfg.Refs.Complete {
@@ -123,7 +132,7 @@ func newCompleters(cfg *config.Config) []*complete.Completer {
 	if len(own) > 0 {
 		out = append(out, complete.New(own...))
 	}
-	return out
+	return out, missing
 }
 
 // done reads the answer of a modal.
