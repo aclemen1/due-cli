@@ -59,31 +59,17 @@ type HideCited struct {
 
 // Judge asks a decision model which lines would cost dearly if forgotten.
 type Judge struct {
-	// Providers are tried in order: the first that answers wins.
-	Providers []Provider `yaml:"providers,omitempty"`
-	Context   string     `yaml:"context,omitempty"`    // who the owner is, before every question
-	Threshold float64    `yaml:"threshold,omitempty"`  // critical from this probability, default 0.5
-	Horizon   string     `yaml:"horizon,omitempty"`    // lines assessed, default 365d
-	Nightly   string     `yaml:"nightly,omitempty"`    // time of the nightly assessment, default 03:30
-	Morning   string     `yaml:"morning,omitempty"`    // time of the alerts, default 07:30
-	Notice    []string   `yaml:"notice,omitempty"`     // alerts before a critical line, default 14d, 2d
-	Digest    string     `yaml:"digest,omitempty"`     // weekday of the digest, default monday; off disables it
-	DigestFor string     `yaml:"digest_for,omitempty"` // window of the digest, default 30d
-}
-
-type Provider struct {
-	Name     string   `yaml:"name"`
-	Endpoint string   `yaml:"endpoint"`
-	Model    string   `yaml:"model,omitempty"`
-	Key      Key      `yaml:"key,omitempty"`
-	Start    []string `yaml:"start,omitempty"` // starts a local server that is not running, stopped after use
-	Ready    string   `yaml:"ready,omitempty"` // how long a started server may take, default 10min
-}
-
-type Key struct {
-	Env          string `yaml:"env,omitempty"`
-	Keychain     string `yaml:"keychain,omitempty"`
-	KeychainFile string `yaml:"keychain_file,omitempty"`
+	// Provider asks jev (Jev, then OpenJev on refusal) or openjev (local only);
+	// empty: no judge. URLs, key, fallback and start: ~/.config/jev/config.yaml.
+	Provider  string   `yaml:"provider,omitempty"`
+	Context   string   `yaml:"context,omitempty"`    // who the owner is, before every question
+	Threshold float64  `yaml:"threshold,omitempty"`  // critical from this probability, default 0.5
+	Horizon   string   `yaml:"horizon,omitempty"`    // lines assessed, default 365d
+	Nightly   string   `yaml:"nightly,omitempty"`    // time of the nightly assessment, default 03:30
+	Morning   string   `yaml:"morning,omitempty"`    // time of the alerts, default 07:30
+	Notice    []string `yaml:"notice,omitempty"`     // alerts before a critical line, default 14d, 2d
+	Digest    string   `yaml:"digest,omitempty"`     // weekday of the digest, default monday; off disables it
+	DigestFor string   `yaml:"digest_for,omitempty"` // window of the digest, default 30d
 }
 
 type Sphere struct {
@@ -225,12 +211,6 @@ func (c *Config) fill() {
 	if j.DigestFor == "" {
 		j.DigestFor = "30d"
 	}
-	for i := range j.Providers {
-		j.Providers[i].Key.KeychainFile = Expand(j.Providers[i].Key.KeychainFile)
-		for k, a := range j.Providers[i].Start {
-			j.Providers[i].Start[k] = Expand(a)
-		}
-	}
 	for name, s := range c.Spheres {
 		s.Root = Expand(s.Root)
 		if s.Prefix == "" {
@@ -320,3 +300,6 @@ func (c *Config) SphereOfID(id string) (string, bool) {
 	}
 	return "", false
 }
+
+// On says whether a judge is configured.
+func (j Judge) On() bool { return j.Provider != "" && j.Provider != "none" }

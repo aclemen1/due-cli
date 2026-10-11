@@ -5,8 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/aclemen1/jev"
 
 	"github.com/aclemen1/due-cli/internal/config"
 	"github.com/aclemen1/due-cli/internal/connect"
@@ -25,7 +29,15 @@ func TestFallbackAndCache(t *testing.T) {
 	}))
 	defer local.Close()
 
-	c, err := New(config.Judge{Providers: []config.Provider{{Name: "jev", Endpoint: down.URL}, {Name: "openjev", Endpoint: local.URL}}})
+	dir := t.TempDir()
+	p := filepath.Join(dir, "jev.yaml")
+	os.WriteFile(p, []byte("providers:\n  - {name: jev, url: "+down.URL+"/v1/systemone}\n  - {name: openjev, url: "+local.URL+"/v1/systemone}\nstate_dir: "+dir+"\n"), 0o644)
+	jc, err := jev.LoadConfig(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j, _ := jev.New(jc)
+	c, err := NewWith(config.Judge{Provider: "jev"}, j)
 	if err != nil {
 		t.Fatal(err)
 	}

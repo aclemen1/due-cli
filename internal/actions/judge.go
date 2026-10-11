@@ -311,7 +311,7 @@ func dailyPath() string { return filepath.Join(config.StateDir(), "daily.json") 
 // SpawnDaily starts, detached, the nightly assessment and the morning alerts
 // once a day each, as soon as their time has come (a sleeping Mac catches up once).
 func SpawnDaily(cfg *config.Config, cfgFlag string, now time.Time) []string {
-	if len(cfg.Judge.Providers) == 0 {
+	if !cfg.Judge.On() {
 		return nil
 	}
 	s := dailyState{}
@@ -356,7 +356,7 @@ func registerJudge() {
 	spec.Register(&spec.Action{
 		Category: "judge", Name: "assess", Top: true,
 		Summary: "Ask the judge (jev, else OpenJev) which lines would cost dearly if forgotten: legal, financial, irreversible.",
-		Discussion: "Each line not judged yet (or whose title or date changed) is sent to the providers of judge.providers, in order: " +
+		Discussion: "Each line not judged yet (or whose title or date changed) is sent to the judge (judge.provider: jev, which falls back to OpenJev, or openjev; see ~/.config/jev/config.yaml): " +
 			"title, date, source, detail and sphere, never a body. Verdicts are kept in ~/.local/state/due/judge.json. " +
 			"The launcher runs it every night at judge.nightly.",
 		Params: []spec.Param{
@@ -364,7 +364,7 @@ func registerJudge() {
 			{Name: "force", Kind: spec.Bool, Help: "Judge again the lines already judged."},
 			readSphereParam(),
 		},
-		Effects:  []string{"Sends the lines to the judge's providers; writes the verdict cache."},
+		Effects:  []string{"Sends the lines to the judge; writes the verdict cache."},
 		Examples: []string{"due assess", "due assess --until 60d --sphere perso --format text"},
 		Run: func(ctx *spec.Context) (any, error) {
 			cfg, err := config.Load(ctx.Config)

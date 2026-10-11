@@ -4,20 +4,18 @@
 package judge
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
+
+	"github.com/aclemen1/jev"
 
 	"github.com/aclemen1/due-cli/internal/config"
 	"github.com/aclemen1/due-cli/internal/connect"
@@ -130,88 +128,42 @@ func IsCritical(it connect.Item, threshold float64) bool {
 
 // ---------------------------------------------------------------- client
 
+// Client asks the judge through the jev module.
 type Client struct {
-	conf    config.Judge
-	http    *http.Client
-	started map[string]*exec.Cmd
+	conf config.Judge
+	jev  *jev.Client
+	only string
 }
 
+// New opens the judge of the configuration (judge.provider) on ~/.config/jev/config.yaml.
 func New(conf config.Judge) (*Client, error) {
-	if len(conf.Providers) == 0 {
-		return nil, fmt.Errorf("no judge provider: add judge.providers to %s (jev, then openjev)", config.Path(""))
+	if !conf.On() {
+		return nil, fmt.Errorf("no judge: set judge.provider in %s (jev, or openjev)", config.Path(""))
 	}
-	return &Client{conf: conf, http: &http.Client{Timeout: 60 * time.Second}, started: map[string]*exec.Cmd{}}, nil
+	j, err := jev.Load()
+	if err != nil {
+		return nil, err
+	}
+	return NewWith(conf, j)
 }
 
-func key(k config.Key) string {
-	if k.Env != "" {
-		if v := strings.TrimSpace(os.Getenv(k.Env)); v != "" {
-			return v
-		}
+// NewWith opens the judge on a jev client.
+func NewWith(conf config.Judge, j *jev.Client) (*Client, error) {
+	c := &Client{conf: conf, jev: j}
+	switch conf.Provider {
+	case "jev":
+	case "openjev":
+		c.only = "openjev"
+	default:
+		return nil, fmt.Errorf("judge.provider %q: jev or openjev", conf.Provider)
 	}
-	if k.Keychain == "" {
-		return ""
-	}
-	args := []string{"find-generic-password", "-s", k.Keychain, "-w"}
-	if k.KeychainFile != "" {
-		_ = exec.Command("security", "unlock-keychain", "-p", "", k.KeychainFile).Run()
-		args = append(args, k.KeychainFile)
-	}
-	out, err := exec.Command("security", args...).Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
+	return c, nil
 }
 
 type answer struct {
 	Choice     string   `json:"choice"`
 	Noul       *float64 `json:"noul"`
 	Confidence float64  `json:"confidence"`
-}
-
-func (c *Client) ask(ctx context.Context, p config.Provider, state map[string]any) (Verdict, error) {
-	q := question
-	if s := strings.TrimSpace(c.conf.Context); s != "" {
-		q = s + "\n\n" + q
-	}
-	body, _ := json.Marshal(map[string]any{"model": p.Model, "state": state, "questions": map[string]any{
-		"critical": map[string]any{"type": "noul", "instructions": map[string]any{"item": "the deadline in the state", "question": q}},
-		"nature":   map[string]any{"type": "choice", "instructions": "What would forgetting this deadline cost the owner?", "criteria": Natures},
-	}})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.Endpoint, bytes.NewReader(body))
-	if err != nil {
-		return Verdict{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if k := key(p.Key); k != "" {
-		req.Header.Set("Authorization", "Bearer "+k)
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return Verdict{}, err
-	}
-	defer resp.Body.Close()
-	var out struct {
-		Model   string            `json:"model"`
-		Answers map[string]answer `json:"answers"`
-		Error   any               `json:"error"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return Verdict{}, fmt.Errorf("%s: %s", p.Name, resp.Status)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return Verdict{}, fmt.Errorf("%s: %s %v", p.Name, resp.Status, out.Error)
-	}
-	crit := out.Answers["critical"]
-	if crit.Noul == nil {
-		return Verdict{}, fmt.Errorf("%s: no answer to critical", p.Name)
-	}
-	model, _, _ := strings.Cut(out.Model, " ")
-	if model == "" {
-		model = p.Name
-	}
-	return Verdict{Critical: *crit.Noul, Nature: out.Answers["nature"].Choice, Confidence: out.Answers["nature"].Confidence, Model: model}, nil
 }
 
 // State is what the judge sees of a line: no body, no message.
@@ -227,75 +179,30 @@ func State(it connect.Item, now time.Time) map[string]any {
 	return s
 }
 
-// Judge asks the providers in order about a line; the first that answers wins.
+// Judge asks about a line: Jev, then OpenJev when Jev refuses or does not answer.
 func (c *Client) Judge(ctx context.Context, it connect.Item, now time.Time) (Verdict, error) {
-	var errs []string
-	for _, p := range c.conf.Providers {
-		if len(p.Start) > 0 {
-			if err := c.ensure(ctx, p); err != nil {
-				errs = append(errs, err.Error())
-				continue
-			}
-		}
-		v, err := c.ask(ctx, p, State(it, now))
-		if err == nil {
-			v.Judged = now
-			return v, nil
-		}
-		errs = append(errs, err.Error())
+	q := question
+	if s := strings.TrimSpace(c.conf.Context); s != "" {
+		q = s + "\n\n" + q
 	}
-	return Verdict{}, fmt.Errorf("no judge answered: %s", strings.Join(errs, "; "))
-}
-
-// ensure starts a local provider that does not answer, and waits for it.
-func (c *Client) ensure(ctx context.Context, p config.Provider) error {
-	base := strings.TrimSuffix(p.Endpoint, "/systemone")
-	up := func() bool {
-		r, err := (&http.Client{Timeout: 2 * time.Second}).Get(base + "/version")
-		if err != nil {
-			return false
-		}
-		r.Body.Close()
-		return r.StatusCode < 500
-	}
-	if up() {
-		return nil
-	}
-	if _, ok := c.started[p.Name]; ok {
-		return fmt.Errorf("%s: started but not answering", p.Name)
-	}
-	cmd := exec.Command(p.Start[0], p.Start[1:]...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	logf, _ := os.OpenFile(filepath.Join(config.StateDir(), "judge-"+p.Name+".log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	cmd.Stdout, cmd.Stderr = logf, logf
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("%s: start: %v", p.Name, err)
-	}
-	c.started[p.Name] = cmd
-	wait, err := when.ParseDuration(p.Ready)
+	res, provider, err := c.jev.Ask(ctx, jev.Request{State: State(it, now), Only: c.only, Questions: map[string]any{
+		"critical": map[string]any{"type": "noul", "instructions": map[string]any{"item": "the deadline in the state", "question": q}},
+		"nature":   map[string]any{"type": "choice", "instructions": "What would forgetting this deadline cost the owner?", "criteria": Natures},
+	}})
 	if err != nil {
-		wait = 10 * time.Minute
+		return Verdict{}, err
 	}
-	deadline := time.Now().Add(wait)
-	for time.Now().Before(deadline) {
-		if up() {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(3 * time.Second):
-		}
+	var crit, nature answer
+	_ = res.Decode("nature", &nature)
+	if err := res.Decode("critical", &crit); err != nil || crit.Noul == nil {
+		return Verdict{}, fmt.Errorf("%s: no answer to critical", provider)
 	}
-	return fmt.Errorf("%s: not ready after %s (log: %s)", p.Name, wait, filepath.Join(config.StateDir(), "judge-"+p.Name+".log"))
+	model, _, _ := strings.Cut(res.Model, " ")
+	if model == "" {
+		model = provider
+	}
+	return Verdict{Critical: *crit.Noul, Nature: nature.Choice, Confidence: nature.Confidence, Model: model, Judged: now}, nil
 }
 
-// Close stops the local servers this client started.
-func (c *Client) Close() {
-	for _, cmd := range c.started {
-		if cmd.Process != nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-			_ = cmd.Wait()
-		}
-	}
-}
+// Close withdraws from the local server; the last user stops it.
+func (c *Client) Close() { _ = c.jev.Close() }
